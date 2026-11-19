@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -41,6 +42,28 @@ _REGISTRY_FILE = _SYNTHETIC_DATA_ROOT / "medication_registry.json"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Lifespan (replaces deprecated @app.on_event)
+# ──────────────────────────────────────────────────────────────────────────────
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):  # noqa: ARG001
+    """Run startup logic before the app begins serving requests."""
+    if not _REGISTRY_FILE.exists():
+        logger.warning(
+            "synthetic_data/medication_registry.json not found — generating synthetic data."
+        )
+        _generate_all_synthetic_data()
+
+    try:
+        reload_registry()
+        logger.info("Medication registry loaded at startup.")
+    except Exception as exc:  # pragma: no cover
+        logger.error("Failed to load registry at startup: %s", exc)
+
+    yield  # app runs here
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Application factory
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -54,6 +77,7 @@ app = FastAPI(
     version="0.1.0",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=_lifespan,
 )
 
 
@@ -80,31 +104,6 @@ app.include_router(documents_router)
 app.include_router(hitl_router)
 app.include_router(analytics_router)
 app.include_router(synthetic_router)
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Startup: ensure synthetic data exists
-# ──────────────────────────────────────────────────────────────────────────────
-
-@app.on_event("startup")
-def _startup_synthetic_check() -> None:
-    """
-    On startup, ensure synthetic data files are present.
-
-    If the medication registry JSON is missing, generate all synthetic data
-    automatically so the app starts cleanly without a manual pre-step.
-    """
-    if not _REGISTRY_FILE.exists():
-        logger.warning(
-            "synthetic_data/medication_registry.json not found — generating synthetic data."
-        )
-        _generate_all_synthetic_data()
-
-    try:
-        reload_registry()
-        logger.info("Medication registry loaded at startup.")
-    except Exception as exc:  # pragma: no cover
-        logger.error("Failed to load registry at startup: %s", exc)
 
 
 def _generate_all_synthetic_data() -> None:
