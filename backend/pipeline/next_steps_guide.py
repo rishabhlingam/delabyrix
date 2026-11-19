@@ -91,19 +91,22 @@ _ROLE_NEXT_STEPS: dict[str, str] = {
 # Prompt templates
 # ──────────────────────────────────────────────────────────────────────────────
 
-_NEXT_STEPS_PROMPT = """\
-You are a clinical navigator. Based on the following explanation, provide
-specific, actionable next steps for the recipient.
+_NEXT_STEPS_SYSTEM = (
+    "You are a clinical navigator. "
+    "Your ONLY task is to produce specific, actionable next steps based on the explanation provided. "
+    "Rules you MUST follow:\n"
+    "1. Output ONLY the numbered next steps — no preamble, no meta-commentary.\n"
+    "2. Do NOT recommend specific medications or treatments; direct the recipient to a healthcare professional.\n"
+    "3. Do NOT add unrelated legal disclaimers, privacy notices, or genetic-privacy text "
+    "   not already present in the explanation.\n"
+    "4. Apply this guidance:\n"
+    "   Role: {user_type}\n"
+    "   Jurisdiction: {registry} ({privacy_law})\n"
+    "   {medication_section}"
+    "   Guidance: {role_guidance}"
+)
 
-Role: {user_type}
-Jurisdiction: {registry} ({privacy_law})
-{medication_section}
-Guidance: {role_guidance}
-
-Explanation:
-{framed_text}
-
-Next steps:"""
+_NEXT_STEPS_PROMPT = "Produce next steps for the following explanation:\n\n{framed_text}"
 
 _MEDICATION_SECTION_TEMPLATE = """\
 IMPORTANT — Medication Alert:
@@ -172,16 +175,20 @@ def generate_next_steps(
             alternatives=alt_text,
         )
 
-    prompt = _NEXT_STEPS_PROMPT.format(
+    system = _NEXT_STEPS_SYSTEM.format(
         user_type=user_type,
         registry=jurisdiction.registry,
         privacy_law=jurisdiction.privacy_law,
         medication_section=medication_section,
         role_guidance=role_guidance,
-        framed_text=framed_text,
     )
+    prompt = _NEXT_STEPS_PROMPT.format(framed_text=framed_text)
 
-    wx_resp: WatsonxResponse = client.generate(prompt, max_new_tokens=512)
+    wx_resp: WatsonxResponse = client.generate(
+        prompt,
+        system_prompt=system,
+        max_new_tokens=512,
+    )
 
     logger.debug(
         "Next steps: user_type=%s flagged_meds=%d confidence=%.4f",

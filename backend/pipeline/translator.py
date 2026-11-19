@@ -8,7 +8,7 @@ and flags when the declared source language does not match the detected
 language of the text.
 
 Supported language codes: "en", "es", "hi"
-Model: ibm/granite-3-8b-instruct via backend/watsonx/client.py
+Model: ibm/granite-4-h-small via backend/watsonx/client.py
 
 Usage
 ─────
@@ -125,14 +125,22 @@ class TranslationResult:
 # Prompt template
 # ──────────────────────────────────────────────────────────────────────────────
 
-_TRANSLATE_PROMPT = """\
-Translate the following text from {source_lang_name} to {target_lang_name}.
-Preserve medical terminology accuracy. Output ONLY the translated text with no
-preamble, explanation, or quotation marks.
+# System prompt keeps Granite strictly in translation mode.
+_TRANSLATE_SYSTEM = (
+    "You are a professional medical translator. "
+    "Your ONLY task is to translate the user-provided text from {source_lang_name} to {target_lang_name}. "
+    "Rules you MUST follow:\n"
+    "1. Output ONLY the translated text — no preamble, no explanation, no quotation marks.\n"
+    "2. Preserve all medical and drug names accurately. "
+    "   Spanish/Hindi variants must be rendered as the correct international nonproprietary name (INN): "
+    "   metamizol → metamizole, dipirona → metamizole, "
+    "   ibuprofeno → ibuprofen, paracetamol → paracetamol, "
+    "   amoxicilina → amoxicillin.\n"
+    "3. Do NOT add legal disclaimers, privacy notices, or any text not present in the original.\n"
+    "4. Do NOT comment on the content — just translate it."
+)
 
-Text: {text}
-
-Translation:"""
+_TRANSLATE_PROMPT = "Translate this {source_lang_name} text to {target_lang_name}:\n\n{text}"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -182,13 +190,21 @@ def translate(
     src_name = _LANGUAGE_NAMES.get(src, src)
     tgt_name = _LANGUAGE_NAMES.get(tgt, tgt)
 
+    system = _TRANSLATE_SYSTEM.format(
+        source_lang_name=src_name,
+        target_lang_name=tgt_name,
+    )
     prompt = _TRANSLATE_PROMPT.format(
         source_lang_name=src_name,
         target_lang_name=tgt_name,
         text=text,
     )
 
-    wx_resp: WatsonxResponse = client.generate(prompt, max_new_tokens=512)
+    wx_resp: WatsonxResponse = client.generate(
+        prompt,
+        system_prompt=system,
+        max_new_tokens=512,
+    )
 
     # Strip any leading/trailing artifacts Granite might prepend
     translated = wx_resp.text.strip().strip('"').strip("'")

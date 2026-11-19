@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     watsonx_api_key: Optional[str] = Field(default=None)
     watsonx_project_id: Optional[str] = Field(default=None)
     watsonx_url: str = Field(default="https://us-south.ml.cloud.ibm.com")
-    watsonx_model_id: str = Field(default="ibm/granite-3-8b-instruct")
+    watsonx_model_id: str = Field(default="ibm/granite-4-h-small")
 
     # ── Offline / test mode ───────────────────────────────────────────────────
     # Set WATSONX_MOCK_MODE=true to skip real API calls; deterministic stubs

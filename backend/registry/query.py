@@ -33,9 +33,14 @@ def check_medication(
     """
     Look up a medication by INN or brand name within a specific jurisdiction.
 
+    Exact case-insensitive matches on name_generic or name_brand are tried
+    first.  Only if no exact match exists does the function fall back to
+    substring/partial matching, so ``"ibuprofen"`` never accidentally
+    collides with ``"ibuprofen lysinate"``.
+
     Parameters
     ──────────
-    medication_name : INN or brand name (case-insensitive, partial match allowed)
+    medication_name : INN or brand name (case-insensitive)
     jurisdiction    : "US_FDA" | "EU_EMA"
 
     Returns
@@ -45,7 +50,31 @@ def check_medication(
     query = _normalise(medication_name)
     j = jurisdiction.upper()
 
-    for raw in get_registry():
+    registry = get_registry()
+
+    # ── Pass 1: exact match ───────────────────────────────────────────────────
+    for raw in registry:
+        if raw.get("jurisdiction", "").upper() != j:
+            continue
+        if (
+            query == _normalise(raw.get("name_generic", ""))
+            or query == _normalise(raw.get("name_brand", ""))
+        ):
+            record = MedicationRecord.model_validate(raw)
+            return RegistryCheckResponse(
+                medication_id=record.medication_id,
+                name_generic=record.name_generic,
+                name_brand=record.name_brand,
+                jurisdiction=record.jurisdiction,
+                status=record.status,
+                restriction_reason=record.restriction_reason,
+                therapeutic_alternatives=record.therapeutic_alternatives,
+                last_updated=record.last_updated,
+                source_registry=record.source_registry,
+            )
+
+    # ── Pass 2: substring / partial match (fallback only) ────────────────────
+    for raw in registry:
         if raw.get("jurisdiction", "").upper() != j:
             continue
         if query in _normalise(raw.get("name_generic", "")) or query in _normalise(
@@ -63,6 +92,7 @@ def check_medication(
                 last_updated=record.last_updated,
                 source_registry=record.source_registry,
             )
+
     return None
 
 

@@ -5,18 +5,32 @@ Thin wrapper around ibm-watsonx-ai for Granite model inference.
 
 Design principles
 ─────────────────
-* Real mode (WATSONX_MOCK_MODE=false):  calls ibm-watsonx-ai ModelInference,
-  raises WatsonxClientError on credential/network failures.
+* Real mode (WATSONX_MOCK_MODE=false):  calls ibm-watsonx-ai ModelInference
+  via the chat interface (system + user messages) using Granite's native role
+  tags so the model stays on-task and does not drift into boilerplate text.
+  Raises WatsonxClientError on credential/network failures.
 * Mock mode (WATSONX_MOCK_MODE=true):  returns deterministic stub responses
   so tests and offline demos never burn cloud credits.
 * Every call returns a WatsonxResponse dataclass that includes the response
   text, an estimated confidence score, and the raw model metadata.
 
+generate() signature
+────────────────────
+    generate(prompt, *, system_prompt=None, max_new_tokens=None, temperature=None)
+
+    prompt        — the user-turn content (plain text, already formatted by
+                    the pipeline stage).
+    system_prompt — optional system-turn text; when omitted a minimal default
+                    is used to keep the model in its clinical assistant role.
+
 Usage
 ─────
     from backend.watsonx.client import get_client
     client = get_client()
-    resp = client.generate(prompt="Explain deductibles in plain English.")
+    resp = client.generate(
+        prompt="Explain deductibles in plain English.",
+        system_prompt="You are a clinical language specialist.",
+    )
     print(resp.text, resp.confidence)
 """
 
@@ -79,6 +93,12 @@ _DEFAULT_PARAMS: Dict[str, Any] = {
     "top_p": 0.9,
     "repetition_penalty": 1.1,
 }
+
+_DEFAULT_SYSTEM_PROMPT = (
+    "You are a clinical language specialist assisting with medical and billing "
+    "document interpretation. Respond only to the task given. "
+    "Do NOT produce content unrelated to the clinical or administrative topic in the user message."
+)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -158,16 +178,33 @@ class WatsonxClient:
         """
         Derive a confidence estimate from the SDK response.
 
-        Uses the mean of token log-probabilities when present; falls back to
-        0.90 for a successful call with no log-prob metadata.
+        Handles both the chat response format (``choices[0].logprobs``) and
+        the legacy generate response format (``results[0].generated_tokens``).
+        Falls back to 0.90 when log-probability metadata is absent.
         """
+        import math
+
         try:
+            # Chat format: choices[0].logprobs.content[*].logprob
+            choices = raw_response.get("choices", [])
+            if choices:
+                logprobs_obj = choices[0].get("logprobs") or {}
+                tokens = logprobs_obj.get("content", [])
+                log_probs = [
+                    t.get("logprob", 0.0)
+                    for t in tokens
+                    if t.get("logprob") is not None
+                ]
+                if log_probs:
+                    avg_lp = sum(log_probs) / len(log_probs)
+                    return round(min(1.0, max(0.0, math.exp(avg_lp))), 4)
+                return 0.90
+
+            # Legacy generate format: results[0].generated_tokens[*].logprob
             results = raw_response.get("results", [])
             if not results:
                 return 0.90
             tokens = results[0].get("generated_tokens", [])
-            if not tokens:
-                return 0.90
             log_probs = [
                 t.get("logprob", 0.0)
                 for t in tokens
@@ -175,11 +212,8 @@ class WatsonxClient:
             ]
             if not log_probs:
                 return 0.90
-            import math
             avg_lp = sum(log_probs) / len(log_probs)
-            # exp(avg_log_prob) gives an approximate per-token probability
-            confidence = min(1.0, max(0.0, math.exp(avg_lp)))
-            return round(confidence, 4)
+            return round(min(1.0, max(0.0, math.exp(avg_lp))), 4)
         except Exception:
             return 0.90
 
@@ -211,15 +245,27 @@ class WatsonxClient:
         self,
         prompt: str,
         *,
+        system_prompt: Optional[str] = None,
         max_new_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
     ) -> WatsonxResponse:
         """
-        Generate text from *prompt* using Granite.
+        Generate text using Granite's chat interface.
+
+        In real mode the prompt is wrapped in Granite's native
+        role tags so the model stays strictly on the assigned clinical task
+        and cannot drift into unrelated boilerplate (e.g. privacy notices
+        triggered by [SSN] tokens). A stop sequence prevents the model from
+        generating a follow-up user/system turn.
+
+        In mock mode the raw *prompt* string is passed unchanged to the stub
+        so all existing tests continue to work without modification.
 
         Parameters
         ──────────
-        prompt         : The full prompt string.
+        prompt         : User-turn content (the task-specific request).
+        system_prompt  : System-turn instructions.  Defaults to a brief
+                         clinical-assistant directive when omitted.
         max_new_tokens : Override the default max_new_tokens for this call.
         temperature    : Override the default temperature for this call.
 
@@ -237,21 +283,28 @@ class WatsonxClient:
 
         try:
             model = self._ensure_model()
+
+            sys_text = system_prompt if system_prompt is not None else _DEFAULT_SYSTEM_PROMPT
+
             params: Dict[str, Any] = {}
             if max_new_tokens is not None:
                 params["max_new_tokens"] = max_new_tokens
             if temperature is not None:
                 params["temperature"] = temperature
 
-            raw = model.generate(prompt=prompt, params=params or None)
-            results = raw.get("results", [{}])
-            generated_text = results[0].get("generated_text", "").strip()
+            messages = [
+                {"role": "system", "content": sys_text},
+                {"role": "user", "content": prompt},
+            ]
+            raw = model.chat(messages=messages, params=params if params else None)
+            generated_text = (
+                raw["choices"][0]["message"]["content"]
+            ).strip()
             confidence = self._estimate_confidence(raw)
 
             logger.debug(
-                "watsonx generate: model=%s tokens=%d confidence=%.4f",
+                "watsonx chat: model=%s confidence=%.4f",
                 self._model_id,
-                results[0].get("generated_token_count", -1),
                 confidence,
             )
             return WatsonxResponse(

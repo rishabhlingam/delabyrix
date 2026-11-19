@@ -107,19 +107,23 @@ Key clinical/billing concepts to explain in plain language:
 # Prompt template
 # ──────────────────────────────────────────────────────────────────────────────
 
-_INTERPRET_PROMPT = """\
-You are a clinical language specialist helping patients understand medical and
-billing documents. Rewrite the following text in plain, accessible language.
-Do NOT give medical advice. Do NOT diagnose or recommend treatments.
+_INTERPRET_SYSTEM = (
+    "You are a clinical language specialist. "
+    "Your ONLY task is to rewrite the provided medical or billing text in plain, accessible language. "
+    "Rules you MUST follow:\n"
+    "1. Output ONLY the plain-language rewrite — no preamble or commentary.\n"
+    "2. Do NOT give medical advice. Do NOT diagnose or recommend treatments.\n"
+    "3. Do NOT add privacy notices, legal disclaimers, or genetic-privacy boilerplate "
+    "   unless that topic is explicitly present in the original text.\n"
+    "4. If the text contains placeholder tokens such as [SSN], [EMAIL], or [PHONE], "
+    "   treat them as redacted personal data and do NOT expand, explain, or comment on them "
+    "   beyond noting that the information has been removed for privacy.\n"
+    "5. Use the clinical glossary below to explain any clinical or billing terms present.\n"
+    "{glossary}\n"
+    "Jurisdiction: {registry} ({privacy_law})"
+)
 
-{glossary}
-
-Jurisdiction context: {registry} ({privacy_law})
-
-Original text:
-{text}
-
-Plain-language explanation:"""
+_INTERPRET_PROMPT = "Rewrite the following text in plain language:\n\n{text}"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -145,17 +149,48 @@ _KNOWN_INNS = [
     "amoxicillin", "ibuprofen", "aspirin", "paracetamol", "acetaminophen",
     "metformin", "atorvastatin", "lisinopril", "amlodipine", "omeprazole",
     "warfarin", "clopidogrel", "metoprolol", "losartan", "simvastatin",
+    "rosiglitazone", "domperidone", "phenylephrine",
 ]
+
+# Spanish and Hindi drug-name variants that should be normalised to their INN
+# before the registry check so the keyword scanner catches them even when Stage 1
+# (translation) has not yet been applied, or when the LLM returned the Spanish
+# form instead of the English INN.
+_INN_ALIASES: dict[str, str] = {
+    # Spanish variants
+    "metamizol":      "metamizole",
+    "dipirona":       "metamizole",
+    "ibuprofeno":     "ibuprofen",
+    "amoxicilina":    "amoxicillin",
+    "talidomida":     "thalidomide",
+    "cloranfenicol":  "chloramphenicol",
+    "warfarina":      "warfarin",
+    "metformina":     "metformin",
+    # Brand name → INN mappings (for well-known brand names that may appear
+    # in patient text without the INN, e.g. "Avandia" → "rosiglitazone")
+    "avandia":        "rosiglitazone",
+    "vioxx":          "rofecoxib",
+    # Hindi transliterations (common romanised spellings)
+    "mетамизол":      "metamizole",   # Cyrillic spillover — defensively included
+    "aibuprophen":    "ibuprofen",
+}
 
 
 def _extract_medication_candidates(text: str) -> List[str]:
     """
     Return a list of candidate medication names found in *text*.
 
-    Combines known INN names with a heuristic scan near medication context words.
+    Combines known INN names (and their Spanish/Hindi aliases) with a
+    heuristic scan near medication context words.  Alias variants are
+    normalised to their canonical INN so the registry lookup succeeds.
     """
     lower = text.lower()
     candidates: list[str] = []
+
+    # Alias normalisation — map Spanish/Hindi variants to canonical INN first
+    for alias, canonical in _INN_ALIASES.items():
+        if alias in lower:
+            candidates.append(canonical)
 
     # Known INN names
     for inn in _KNOWN_INNS:
@@ -203,14 +238,18 @@ def interpret(
     ───────
     MedicalInterpretationResult.
     """
-    prompt = _INTERPRET_PROMPT.format(
+    system = _INTERPRET_SYSTEM.format(
         glossary=_CLINICAL_GLOSSARY,
         registry=jurisdiction.registry,
         privacy_law=jurisdiction.privacy_law,
-        text=text,
     )
+    prompt = _INTERPRET_PROMPT.format(text=text)
 
-    wx_resp: WatsonxResponse = client.generate(prompt, max_new_tokens=600)
+    wx_resp: WatsonxResponse = client.generate(
+        prompt,
+        system_prompt=system,
+        max_new_tokens=600,
+    )
 
     # ── Registry medication checks ────────────────────────────────────────────
     medication_flags: List[MedicationFlag] = []

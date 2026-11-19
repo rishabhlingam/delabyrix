@@ -144,19 +144,22 @@ _USER_TYPE_GUIDANCE: dict[str, str] = {
 # Prompt template
 # ──────────────────────────────────────────────────────────────────────────────
 
-_CULTURAL_PROMPT = """\
-You are a multilingual clinical communication specialist. Revise the following
-medical explanation so it is culturally appropriate and tailored to the
-recipient's role.
+_CULTURAL_SYSTEM = (
+    "You are a multilingual clinical communication specialist. "
+    "Your ONLY task is to revise the provided medical explanation so it is "
+    "culturally appropriate and tailored to the recipient's role. "
+    "Rules you MUST follow:\n"
+    "1. Output ONLY the revised explanation — no preamble, no meta-commentary.\n"
+    "2. Do NOT introduce new medical facts, diagnoses, or treatment recommendations.\n"
+    "3. Do NOT add unrelated legal disclaimers, privacy notices, or regulatory boilerplate "
+    "   not already present in the original explanation.\n"
+    "4. Apply the guidance below exactly:\n"
+    "   Regulatory regime: {regime_note}\n"
+    "   Cultural context: {cultural_guidance}\n"
+    "   Recipient role: {user_type_guidance}"
+)
 
-Regulatory regime: {regime_note}
-Cultural context: {cultural_guidance}
-Recipient role guidance: {user_type_guidance}
-
-Original explanation:
-{text}
-
-Culturally adapted response:"""
+_CULTURAL_PROMPT = "Revise the following medical explanation:\n\n{text}"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -191,14 +194,18 @@ def add_cultural_context(
         user_type.lower(), _USER_TYPE_GUIDANCE["patient"]
     )
 
-    prompt = _CULTURAL_PROMPT.format(
+    system = _CULTURAL_SYSTEM.format(
         regime_note=regime_note,
         cultural_guidance=cultural_guidance,
         user_type_guidance=user_type_guidance,
-        text=text,
     )
+    prompt = _CULTURAL_PROMPT.format(text=text)
 
-    wx_resp: WatsonxResponse = client.generate(prompt, max_new_tokens=600)
+    wx_resp: WatsonxResponse = client.generate(
+        prompt,
+        system_prompt=system,
+        max_new_tokens=600,
+    )
 
     logger.debug(
         "Cultural context: jurisdiction=%s user_type=%s confidence=%.4f",

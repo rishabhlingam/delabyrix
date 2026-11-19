@@ -65,9 +65,15 @@ class RedactionResult:
 # Regex patterns  (compiled once at import time)
 # ──────────────────────────────────────────────────────────────────────────────
 
-# SSN: 123-45-6789 or 123456789
+# SSN: 123-45-6789 or 123456789  (strict US SSN — first group not 000, 666, or 9xx)
 _SSN = re.compile(
     r"\b(?!000|666|9\d\d)\d{3}[-\s]?(?!00)\d{2}[-\s]?(?!0000)\d{4}\b"
+)
+
+# ITIN / 9xx SSN-shaped numbers: same format but starting with 9.
+# ITINs (Individual Taxpayer Identification Numbers) are equally sensitive PII.
+_ITIN = re.compile(
+    r"\b9\d{2}[-\s]\d{2}[-\s]\d{4}\b"
 )
 
 # Email addresses
@@ -109,6 +115,7 @@ _DATE_STANDALONE = re.compile(
     r"|\b\d{4}[\/\-]\d{2}[\/\-]\d{2}\b"       # YYYY-MM-DD
 )
 
+
 # Full name heuristic: 2–4 consecutive title-cased words not at sentence start.
 # Deliberately conservative to avoid over-redacting.
 _NAME_HEURISTIC = re.compile(
@@ -139,6 +146,7 @@ _PATTERNS: List[Tuple[re.Pattern, str, str]] = [
     # (compiled pattern, placeholder, pii_type_label)
     (_EMAIL,           "[EMAIL]",     "email"),
     (_SSN,             "[SSN]",       "ssn"),
+    (_ITIN,            "[ITIN]",      "itin"),
     (_PHONE,           "[PHONE]",     "phone"),
     (_PASSPORT,        "[ID]",        "passport_id"),
     (_DOB_CONTEXTUAL,  "[DOB]",       "dob"),
@@ -208,8 +216,8 @@ def redact(text: str) -> RedactionResult:
         total_count += name_count
         types.append("name")
 
-    # Residual-PII heuristic: check for standalone dates that may be DOBs
-    # We flag but do NOT redact (too aggressive — could be appointment dates)
+    # Residual-PII heuristic: check for standalone dates that may be DOBs.
+    # We flag but do NOT redact (too aggressive — could be appointment dates).
     residual = bool(_DATE_STANDALONE.search(working))
 
     return RedactionResult(

@@ -96,7 +96,7 @@ class TestConfig:
 
     def test_default_model_id(self):
         s = get_settings()
-        assert s.watsonx_model_id == "ibm/granite-3-8b-instruct"
+        assert s.watsonx_model_id == "ibm/granite-4-h-small"
 
     def test_default_url(self):
         s = get_settings()
@@ -139,7 +139,7 @@ class TestWatsonxClientMock:
 
     def test_mock_model_id(self, mock_client):
         resp = mock_client.generate("Any text.")
-        assert resp.model_id == "ibm/granite-3-8b-instruct"
+        assert resp.model_id == "ibm/granite-4-h-small"
 
     def test_max_new_tokens_param_accepted(self, mock_client):
         resp = mock_client.generate("Prompt.", max_new_tokens=100)
