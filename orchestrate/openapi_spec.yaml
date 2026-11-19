@@ -1,0 +1,477 @@
+openapi: "3.0.3"
+
+info:
+  title: "Multilingual Clinical AI Agent — watsonx Orchestrate Skills"
+  description: |
+    OpenAPI specification exporting four clinical AI skills for IBM watsonx
+    Orchestrate natural-language invocation.
+
+    **Skills exported:**
+    - `clinical_query`         — POST /agent/query
+    - `medication_check`       — GET  /registry/check
+    - `get_consent_document`   — GET  /documents/{doc_type}/{language}
+    - `get_dashboard_metrics`  — GET  /analytics/dashboard
+
+    Authentication: `X-API-Key` header (key stored in `.env`, never committed).
+  version: "0.1.0"
+  contact:
+    name: "Clinical AI Platform Team"
+
+servers:
+  - url: "http://localhost:8000"
+    description: "Local development server"
+
+security:
+  - ApiKeyAuth: []
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: >
+        API key for Orchestrate skill authentication.
+        Set the value in your `.env` file as `API_KEY=<value>`.
+        Never commit the actual key to source control.
+
+  schemas:
+    PipelineTrace:
+      type: object
+      description: "Stage-by-stage pipeline output — no raw PII"
+      properties:
+        jurisdiction:
+          type: string
+          example: "US_FDA"
+        pii_redacted:
+          type: boolean
+          example: true
+        translation:
+          type: string
+          example: "I take metamizole at home. Is it allowed in the US?"
+        medical_interpretation:
+          type: string
+        cultural_context:
+          type: string
+        next_steps:
+          type: string
+      required:
+        - jurisdiction
+        - pii_redacted
+        - translation
+        - medical_interpretation
+        - cultural_context
+        - next_steps
+
+    AgentQueryRequest:
+      type: object
+      required:
+        - text
+      properties:
+        text:
+          type: string
+          description: "Raw user input (may contain PII — redacted before LLM call)"
+          example: "I take metamizole at home. Is it allowed in the US?"
+        source_language:
+          type: string
+          description: "BCP-47 language tag"
+          default: "en"
+          enum: ["en", "es", "hi"]
+          example: "es"
+        user_type:
+          type: string
+          description: "Persona: patient | provider | coordinator"
+          default: "patient"
+          enum: ["patient", "provider", "coordinator"]
+        country:
+          type: string
+          description: "ISO 3166-1 alpha-2 country code"
+          default: "US"
+          example: "US"
+        session_id:
+          type: string
+          description: "Client-generated UUID for session continuity (auto-generated if absent)"
+          example: "550e8400-e29b-41d4-a716-446655440000"
+
+    AgentQueryResponse:
+      type: object
+      properties:
+        session_id:
+          type: string
+        pipeline_trace:
+          $ref: "#/components/schemas/PipelineTrace"
+        escalated:
+          type: boolean
+        review_id:
+          type: string
+          nullable: true
+        response_text:
+          type: string
+      required:
+        - session_id
+        - pipeline_trace
+        - escalated
+        - response_text
+
+    AgentEscalatedResponse:
+      type: object
+      description: "Returned when the query is escalated for HITL review (HTTP 202)"
+      properties:
+        session_id:
+          type: string
+        escalated:
+          type: boolean
+          example: true
+        review_id:
+          type: string
+        status:
+          type: string
+          example: "pending_review"
+        message:
+          type: string
+          description: "Localised notice to the user"
+      required:
+        - session_id
+        - escalated
+        - review_id
+        - status
+        - message
+
+    RegistryCheckResponse:
+      type: object
+      properties:
+        medication_id:
+          type: string
+        name_generic:
+          type: string
+          example: "metamizole"
+        name_brand:
+          type: string
+          example: "Dipyrone"
+        jurisdiction:
+          type: string
+          example: "US_FDA"
+        status:
+          type: string
+          enum: ["approved", "restricted", "banned", "delisted"]
+          example: "banned"
+        restriction_reason:
+          type: string
+          nullable: true
+        therapeutic_alternatives:
+          type: array
+          items:
+            type: string
+          example: ["ibuprofen", "acetaminophen"]
+        last_updated:
+          type: string
+          format: date
+          example: "2024-06-15"
+        source_registry:
+          type: string
+          example: "FDA Orange Book"
+      required:
+        - medication_id
+        - name_generic
+        - name_brand
+        - jurisdiction
+        - status
+        - therapeutic_alternatives
+        - last_updated
+        - source_registry
+
+    DocumentResponse:
+      type: object
+      properties:
+        doc_type:
+          type: string
+          example: "consent_surgery"
+        language:
+          type: string
+          example: "es"
+        title:
+          type: string
+          example: "Formulario de Consentimiento para Procedimiento Quirúrgico"
+        content:
+          type: string
+          description: "Full document text with section markers"
+      required:
+        - doc_type
+        - language
+        - title
+        - content
+
+    MedicationFlagEntry:
+      type: object
+      properties:
+        medication:
+          type: string
+          example: "metamizole"
+        status:
+          type: string
+          example: "flagged"
+        count:
+          type: integer
+          example: 3
+      required:
+        - medication
+        - status
+        - count
+
+    DashboardResponse:
+      type: object
+      description: >
+        Aggregated BI metrics — strictly no raw query text or patient PII.
+        Combines anonymized synthetic patient log baseline with live interaction
+        telemetry.
+      properties:
+        total_queries:
+          type: integer
+          example: 243
+        escalation_rate:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+          example: 0.12
+        queries_by_language:
+          type: object
+          additionalProperties:
+            type: integer
+          example:
+            en: 150
+            es: 70
+            hi: 23
+        queries_by_user_type:
+          type: object
+          additionalProperties:
+            type: integer
+          example:
+            patient: 200
+            provider: 35
+            coordinator: 8
+        top_medication_flags:
+          type: array
+          items:
+            $ref: "#/components/schemas/MedicationFlagEntry"
+        avg_pipeline_stages_completed:
+          type: number
+          format: float
+          example: 4.0
+        jurisdiction_breakdown:
+          type: object
+          additionalProperties:
+            type: integer
+          example:
+            US_FDA: 120
+            EU_EMA: 85
+      required:
+        - total_queries
+        - escalation_rate
+        - queries_by_language
+        - queries_by_user_type
+        - top_medication_flags
+        - avg_pipeline_stages_completed
+        - jurisdiction_breakdown
+
+paths:
+  /agent/query:
+    post:
+      operationId: clinical_query
+      summary: "Run the full multilingual clinical AI pipeline"
+      description: |
+        Main entry point for the agentic clinical pipeline. Accepts a user query
+        in any supported language, routes it through five pipeline stages
+        (PII redaction → translation → medical interpretation → cultural context
+        → next steps), and returns a culturally adapted response.
+
+        Returns HTTP 202 when the query is escalated for HITL review.
+      x-ibm-nl-intent: >
+        Use this skill when a patient, provider, or care coordinator asks a
+        clinical question, needs medication guidance, or requests an explanation
+        of a consent form in their own language. Also use it when you need to
+        interpret medical terminology or adapt clinical communication across
+        cultural or jurisdictional boundaries.
+      tags:
+        - agent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentQueryRequest"
+            examples:
+              spanish_patient_banned_drug:
+                summary: "Spanish patient asking about a banned medication"
+                value:
+                  text: "Tomo metamizol en casa. ¿Está permitido en los Estados Unidos?"
+                  source_language: "es"
+                  user_type: "patient"
+                  country: "US"
+              provider_procedure_explanation:
+                summary: "Provider requesting culturally adapted explanation"
+                value:
+                  text: "Explain laparoscopic cholecystectomy risks to an international patient"
+                  source_language: "en"
+                  user_type: "provider"
+                  country: "DE"
+      responses:
+        "200":
+          description: "Pipeline completed — full response returned"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentQueryResponse"
+        "202":
+          description: "Query escalated for HITL review — poll /agent/session/{session_id}"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentEscalatedResponse"
+        "422":
+          description: "Validation error"
+
+  /registry/check:
+    get:
+      operationId: medication_check
+      summary: "Check a medication's regulatory status in a given jurisdiction"
+      description: |
+        Look up a medication by INN or brand name in the cross-border medication
+        registry for a specific jurisdiction (US FDA or EU EMA).
+
+        Returns the regulatory status (approved / restricted / banned / delisted),
+        restriction reason, and therapeutic alternatives.
+      x-ibm-nl-intent: >
+        Use this skill when you need to check whether a specific medication is
+        approved, restricted, banned, or delisted in the United States (US_FDA)
+        or the European Union (EU_EMA). Use it before recommending or discussing
+        any medication for a patient traveling between jurisdictions.
+      tags:
+        - registry
+      parameters:
+        - name: medication_name
+          in: query
+          required: true
+          description: "INN (generic) or brand name — case-insensitive, partial match"
+          schema:
+            type: string
+          example: "metamizole"
+        - name: jurisdiction
+          in: query
+          required: true
+          description: "Target regulatory jurisdiction"
+          schema:
+            type: string
+            enum: ["US_FDA", "EU_EMA"]
+          example: "US_FDA"
+      responses:
+        "200":
+          description: "Medication record found"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegistryCheckResponse"
+        "404":
+          description: "No matching record found"
+        "422":
+          description: "Validation error"
+
+  /documents/{doc_type}/{language}:
+    get:
+      operationId: get_consent_document
+      summary: "Retrieve a multilingual consent or billing document"
+      description: |
+        Retrieve a synthetic consent or billing document in the patient's
+        preferred language. Useful for pre-procedure patient communication.
+      x-ibm-nl-intent: >
+        Use this skill when a patient, provider, or coordinator needs to read,
+        review, or explain a consent form or billing document in a specific
+        language. Supported document types are ICU admission consent, surgical
+        consent, and billing/deductible explanation. Supported languages are
+        English (en), Spanish (es), and Hindi (hi).
+      tags:
+        - documents
+      parameters:
+        - name: doc_type
+          in: path
+          required: true
+          description: "Document type identifier"
+          schema:
+            type: string
+            enum:
+              - consent_icu_admission
+              - consent_surgery
+              - billing_deductible_explanation
+          example: "consent_surgery"
+        - name: language
+          in: path
+          required: true
+          description: "BCP-47 language code"
+          schema:
+            type: string
+            enum: ["en", "es", "hi"]
+          example: "es"
+      responses:
+        "200":
+          description: "Document retrieved"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentResponse"
+        "404":
+          description: "Document file not found"
+        "422":
+          description: "Invalid doc_type or language"
+
+  /analytics/dashboard:
+    get:
+      operationId: get_dashboard_metrics
+      summary: "Return aggregated, anonymized BI dashboard metrics"
+      description: |
+        Returns aggregate interaction metrics for the BI dashboard.
+        Combines anonymized synthetic patient log baseline trends with live
+        interaction telemetry.
+
+        **Privacy guarantee**: raw query text and patient identifiers are NEVER
+        present in this response. Only language codes, user-type counts,
+        medication INN names, and boolean escalation flags are aggregated.
+      x-ibm-nl-intent: >
+        Use this skill when a care coordinator or administrator wants to see
+        overall system usage statistics, escalation rates, top flagged
+        medications, language distribution, or jurisdiction breakdown of
+        clinical queries processed by the platform.
+      tags:
+        - analytics
+      parameters:
+        - name: date_from
+          in: query
+          required: false
+          description: "Filter live telemetry from this date (ISO8601)"
+          schema:
+            type: string
+            format: date
+          example: "2026-01-01"
+        - name: date_to
+          in: query
+          required: false
+          description: "Filter live telemetry up to this date (ISO8601)"
+          schema:
+            type: string
+            format: date
+          example: "2026-12-31"
+        - name: jurisdiction
+          in: query
+          required: false
+          description: "Filter telemetry by jurisdiction"
+          schema:
+            type: string
+            enum: ["US_FDA", "EU_EMA"]
+      responses:
+        "200":
+          description: "Dashboard metrics"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardResponse"
+        "422":
+          description: "Validation error"

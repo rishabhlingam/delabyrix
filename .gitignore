@@ -1,0 +1,41 @@
+﻿# -- secrets & credentials
+.env
+secrets/
+*.key
+config/credentials.json
+
+# -- synthetic data output (generated, never committed)
+synthetic_data/
+
+# -- Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# -- virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# -- pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# -- IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# -- OS
+.DS_Store
+Thumbs.db
