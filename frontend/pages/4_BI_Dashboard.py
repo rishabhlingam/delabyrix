@@ -10,6 +10,11 @@ Charts:
 4. Escalation rate gauge (metric)
 5. Jurisdiction breakdown (bar)
 6. Avg pipeline stages completed (metric)
+7. Emerging Care Needs & Proactive Service Recommendations (section)
+   - Dietary accommodation demand (bar chart)
+   - High-frequency ICD-10 clusters by visitor group (bar chart)
+   - Cross-border medication conflict hotspots (bar chart)
+   - Recommendation cards with magnitude and affected groups
 """
 
 from __future__ import annotations
@@ -228,6 +233,143 @@ fig_gauge = go.Figure(go.Indicator(
 fig_gauge.update_layout(height=280)
 st.plotly_chart(fig_gauge, use_container_width=True)
 
+st.markdown("---")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Section: Emerging Care Needs & Proactive Service Recommendations
+# ══════════════════════════════════════════════════════════════════════════════
+
+st.subheader("🔮 Emerging Care Needs & Proactive Service Recommendations")
+st.caption(
+    "Pattern analysis from anonymized patient logs — dietary accommodation demand, "
+    "high-frequency ICD-10 clusters by visitor group, and cross-border medication "
+    "conflict hotspots. Zero PII."
+)
+
+recs = data.get("proactive_recommendations", [])
+
+if not recs:
+    st.info(
+        "No proactive recommendations computed yet. "
+        "Make sure `synthetic_data/patient_logs.json` exists "
+        "(run `python scripts/generate_synthetic_data.py`)."
+    )
+else:
+    # ── Split by category ─────────────────────────────────────────────────────
+    dietary_recs = [r for r in recs if r.get("category") == "dietary"]
+    icd_recs = [r for r in recs if r.get("category") == "icd10_cluster"]
+    conflict_recs = [r for r in recs if r.get("category") == "medication_conflict"]
+
+    # ── Chart: Dietary accommodation demand ──────────────────────────────────
+    if dietary_recs:
+        st.markdown("#### 🍽️ Dietary Accommodation Demand")
+        diet_col_chart, diet_col_cards = st.columns([3, 2])
+        with diet_col_chart:
+            diet_labels = [
+                r["title"].replace("High demand: ", "").replace(" dietary accommodation", "")
+                for r in dietary_recs
+            ]
+            diet_counts = [r["magnitude"] for r in dietary_recs]
+            fig_diet = px.bar(
+                x=diet_counts,
+                y=diet_labels,
+                orientation="h",
+                labels={"x": "Patient Count", "y": "Dietary Flag"},
+                color=diet_counts,
+                color_continuous_scale="Greens",
+                title="Patient Dietary Requirements",
+            )
+            fig_diet.update_layout(height=max(200, 60 * len(dietary_recs)),
+                                   coloraxis_showscale=False)
+            st.plotly_chart(fig_diet, use_container_width=True)
+        with diet_col_cards:
+            for rec in dietary_recs[:3]:
+                with st.container(border=True):
+                    st.markdown(f"**{rec['title']}**")
+                    st.caption(rec["description"])
+                    if rec.get("affected_groups"):
+                        st.markdown(
+                            "Nationalities: " +
+                            " · ".join(f"`{g}`" for g in rec["affected_groups"])
+                        )
+
+    # ── Chart: ICD-10 clusters ────────────────────────────────────────────────
+    if icd_recs:
+        st.markdown("#### 🩺 High-Frequency ICD-10 Clusters by Visitor Group")
+        icd_col_chart, icd_col_cards = st.columns([3, 2])
+        with icd_col_chart:
+            icd_labels = [r["title"].replace("Emerging cluster: ", "") for r in icd_recs]
+            icd_counts = [r["magnitude"] for r in icd_recs]
+            fig_icd = px.bar(
+                x=icd_labels,
+                y=icd_counts,
+                labels={"x": "ICD-10 Chapter", "y": "Patient Count"},
+                color=icd_counts,
+                color_continuous_scale="Blues",
+                title="Encounter Volume by ICD-10 Chapter",
+            )
+            fig_icd.update_layout(height=320, coloraxis_showscale=False,
+                                  xaxis_tickangle=-30)
+            st.plotly_chart(fig_icd, use_container_width=True)
+        with icd_col_cards:
+            for rec in icd_recs[:3]:
+                with st.container(border=True):
+                    st.markdown(f"**{rec['title']}**")
+                    st.caption(rec["description"])
+                    if rec.get("affected_groups"):
+                        st.markdown(
+                            "Groups: " +
+                            " · ".join(f"`{g}`" for g in rec["affected_groups"])
+                        )
+
+    # ── Chart: Medication conflict hotspots ───────────────────────────────────
+    if conflict_recs:
+        st.markdown("#### ⚠️ Cross-Border Medication Conflict Hotspots")
+        conf_col_chart, conf_col_cards = st.columns([3, 2])
+        with conf_col_chart:
+            conf_labels = [
+                r["title"].replace("Cross-border conflict hotspot: ", "")
+                for r in conflict_recs
+            ]
+            conf_counts = [r["magnitude"] for r in conflict_recs]
+            fig_conf = px.bar(
+                x=conf_counts,
+                y=conf_labels,
+                orientation="h",
+                labels={"x": "Patient Count", "y": "Medication (INN)"},
+                color=conf_counts,
+                color_continuous_scale="Reds",
+                title="Patients on Cross-Jurisdiction Conflict Medications",
+            )
+            fig_conf.update_layout(height=max(200, 60 * len(conflict_recs)),
+                                   coloraxis_showscale=False)
+            st.plotly_chart(fig_conf, use_container_width=True)
+        with conf_col_cards:
+            for rec in conflict_recs[:3]:
+                with st.container(border=True):
+                    st.markdown(f"**{rec['title']}**")
+                    st.caption(rec["description"])
+                    if rec.get("affected_groups"):
+                        st.markdown(
+                            "Top nationalities: " +
+                            " · ".join(f"`{g}`" for g in rec["affected_groups"])
+                        )
+
+    # ── All recommendations summary table ────────────────────────────────────
+    with st.expander("📋 All recommendations (table view)"):
+        rows = [
+            {
+                "Category": r["category"],
+                "Title": r["title"],
+                "Magnitude": r["magnitude"],
+                "Affected Groups": ", ".join(r.get("affected_groups", [])),
+                "Description": r["description"],
+            }
+            for r in recs
+        ]
+        st.dataframe(rows, use_container_width=True)
+
+st.markdown("---")
 st.caption(
     "🔒 Privacy: this dashboard contains only aggregate counts, language codes, "
     "and medication INN names. No raw query text or patient identifiers are present."

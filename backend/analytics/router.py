@@ -6,8 +6,9 @@ FastAPI router for the analytics dashboard endpoint.
 Endpoints
 ─────────
   GET /analytics/dashboard — return aggregated, anonymized BI metrics
+                             including proactive care recommendations
 
-Matches architecture.md §6.5.
+Matches architecture.md §6.5 and idea.txt proactive analytics requirement.
 """
 
 from __future__ import annotations
@@ -24,13 +25,31 @@ router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Response model
+# Response models
 # ──────────────────────────────────────────────────────────────────────────────
 
 class MedicationFlagEntry(BaseModel):
     medication: str
     status: str
     count: int
+
+
+class ProactiveRecommendation(BaseModel):
+    """
+    One proactive care recommendation derived from patient-log pattern analysis.
+    Contains zero PII — only aggregate counts and group codes.
+    """
+    category: str = Field(
+        ...,
+        description="dietary | icd10_cluster | medication_conflict",
+    )
+    title: str
+    description: str
+    affected_groups: List[str] = Field(
+        default_factory=list,
+        description="Nationality codes, language tags, or visit-type labels",
+    )
+    magnitude: int = Field(..., description="Patient count driving this recommendation")
 
 
 class DashboardResponse(BaseModel):
@@ -41,6 +60,14 @@ class DashboardResponse(BaseModel):
     top_medication_flags: List[MedicationFlagEntry]
     avg_pipeline_stages_completed: float
     jurisdiction_breakdown: Dict[str, int]
+    proactive_recommendations: List[ProactiveRecommendation] = Field(
+        default_factory=list,
+        description=(
+            "Emerging care needs derived from patient-log analysis — "
+            "dietary demand, ICD-10 clusters, and cross-border medication conflicts. "
+            "Zero PII."
+        ),
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -63,6 +90,11 @@ def get_dashboard(
     **Privacy guarantee**: raw query text and patient identifiers are never
     present in this response. Only language codes, user-type counts,
     medication INN names, and boolean escalation flags are aggregated.
+
+    The ``proactive_recommendations`` list surfaces emerging care needs
+    (dietary accommodation demand, high-frequency ICD-10 clusters by visitor
+    group, and cross-border medication conflict hotspots) derived from the
+    anonymized patient-log baseline — zero PII.
     """
     payload = build_dashboard(
         date_from=date_from,

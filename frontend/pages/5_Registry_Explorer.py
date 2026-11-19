@@ -4,6 +4,8 @@ frontend/pages/5_Registry_Explorer.py
 Cross-border medication registry explorer.
 
 Features:
+- "Regulatory Sync & Live Alerts" banner with Sync Latest FDA/EMA Bulletins button
+- Changelog table showing versioned sync history
 - Search by medication name (INN or brand)
 - Filter by jurisdiction (US_FDA / EU_EMA / All)
 - Status-highlighted table (banned = red, restricted = orange, approved = green)
@@ -47,7 +49,110 @@ def status_badge(status: str) -> str:
     return f"{icon} {status.capitalize()}"
 
 
-# ── Search & filter controls ──────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# Section 1 — Regulatory Sync & Live Alerts
+# ══════════════════════════════════════════════════════════════════════════════
+
+st.subheader("🔄 Regulatory Sync & Live Alerts")
+
+sync_col, info_col = st.columns([2, 3])
+
+with sync_col:
+    # Simulate a bulletin: escalate domperidone to 'restricted' in US_FDA
+    # (The actual medication_id is resolved dynamically from the registry list.)
+    if st.button("📡 Sync Latest FDA/EMA Bulletins", use_container_width=True):
+        # Step 1: find domperidone's US_FDA medication_id
+        try:
+            check_resp = requests.get(
+                f"{API_BASE}/registry/check",
+                params={"medication_name": "domperidone", "jurisdiction": "US_FDA"},
+                timeout=10,
+            )
+            if check_resp.status_code == 200:
+                med_id = check_resp.json()["medication_id"]
+                # Step 2: post bulletin
+                bulletin_resp = requests.post(
+                    f"{API_BASE}/registry/sync",
+                    json={
+                        "medication_id": med_id,
+                        "source": "FDA Orange Book",
+                        "updates": {
+                            "status": "restricted",
+                            "restriction_reason": (
+                                "FDA bulletin 2026-11: domperidone reclassified as "
+                                "restricted pending QT-interval safety review."
+                            ),
+                        },
+                    },
+                    timeout=10,
+                )
+                if bulletin_resp.status_code == 200:
+                    entry = bulletin_resp.json()
+                    st.success(
+                        f"✅ Bulletin ingested — sync version **{entry['sync_version']}** "
+                        f"({entry['timestamp'][:19]} UTC).  "
+                        f"{len(entry['changes'])} field(s) updated."
+                    )
+                    st.rerun()
+                else:
+                    st.error(f"Sync failed ({bulletin_resp.status_code}): {bulletin_resp.text}")
+            elif check_resp.status_code == 404:
+                st.info("Demo medication not found — registry may need regeneration.")
+            else:
+                st.error(f"Registry lookup failed: {check_resp.status_code}")
+        except requests.exceptions.ConnectionError:
+            st.error("⚠️ Cannot reach the backend. Is `uvicorn backend.main:app` running?")
+            st.stop()
+
+with info_col:
+    st.info(
+        "Clicking **Sync** ingests a simulated FDA bulletin that reclassifies "
+        "*domperidone* (US FDA) from `approved → restricted`. "
+        "Each sync creates a versioned changelog entry with a full field-level diff."
+    )
+
+# ── Changelog table ───────────────────────────────────────────────────────────
+st.markdown("#### 📋 Sync Changelog")
+
+try:
+    cl_resp = requests.get(f"{API_BASE}/registry/changelog", params={"limit": 20}, timeout=10)
+    if cl_resp.status_code == 200:
+        cl_data = cl_resp.json()
+        entries = cl_data.get("entries", [])
+        total_entries = cl_data.get("total_entries", 0)
+
+        if not entries:
+            st.caption("No sync events recorded yet. Click **Sync** above to ingest the first bulletin.")
+        else:
+            st.caption(f"{total_entries} total sync event(s) — showing most recent {len(entries)}")
+            changelog_rows = []
+            for entry in entries:
+                n_changes = len(entry.get("changes", []))
+                changelog_rows.append({
+                    "Version": entry.get("sync_version", ""),
+                    "Timestamp (UTC)": entry.get("timestamp", "")[:19],
+                    "Source": entry.get("source", ""),
+                    "Fields Changed": n_changes,
+                    "Summary": (
+                        ", ".join(
+                            f"{c['field']}: {c['old_value']} → {c['new_value']}"
+                            for c in entry.get("changes", [])
+                            if c.get("field") != "last_updated"
+                        ) or "Full reload / no field changes"
+                    ),
+                })
+            st.dataframe(changelog_rows, use_container_width=True)
+    else:
+        st.error(f"Could not load changelog: {cl_resp.status_code}")
+except requests.exceptions.ConnectionError:
+    st.error("⚠️ Cannot reach the backend.")
+
+st.markdown("---")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Section 2 — Search & Filter
+# ══════════════════════════════════════════════════════════════════════════════
+
 search_col, jur_col, page_col = st.columns([3, 2, 1])
 
 with search_col:

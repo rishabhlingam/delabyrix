@@ -842,12 +842,18 @@ class TestAnalyticsPIIIsolation:
         record_interaction("en", "patient", "US_FDA", False, ["metamizole"])
         result = build_dashboard()
 
+        # proactive_recommendations[*].description contains intentional narrative
+        # text (not raw user text or PII) so we skip that field.
+        _NARRATIVE_FIELDS = {"description"}
+
         def _check_no_long_text(obj, path="root"):
             if isinstance(obj, str):
                 assert len(obj) < 200, \
                     f"Suspiciously long string at {path}: {obj[:80]!r}"
             elif isinstance(obj, dict):
                 for k, v in obj.items():
+                    if k in _NARRATIVE_FIELDS:
+                        continue
                     _check_no_long_text(v, f"{path}.{k}")
             elif isinstance(obj, list):
                 for i, item in enumerate(obj):
