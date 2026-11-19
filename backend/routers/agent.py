@@ -102,8 +102,9 @@ class AgentEscalatedResponse(BaseModel):
 class SessionStatusResponse(BaseModel):
     """Response for GET /agent/session/{session_id}."""
     session_id: str
-    status: str         # approved | pending | rejected
+    status: str                    # approved | pending | rejected
     response_text: Optional[str]
+    rejection_reason: Optional[str] = None
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -297,8 +298,13 @@ def get_session_status(session_id: str) -> SessionStatusResponse:
     if item.status == "approved":
         response_text = item.approved_response
 
+    rejection_reason: Optional[str] = None
+    if item.status == "rejected":
+        rejection_reason = item.rejection_reason
+
     return SessionStatusResponse(
         session_id=session_id,
         status=item.status,
         response_text=response_text,
+        rejection_reason=rejection_reason,
     )
