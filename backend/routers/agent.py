@@ -188,6 +188,8 @@ def agent_query(body: AgentQueryRequest, response: Response):
         medication_flags=interpretation.medication_flags,
         jurisdiction=jurisdiction,
         client=client,
+        medical_interpretation=interpretation.plain_language_text,
+        cultural_context=cultural.framed_text,
     )
 
     # Assemble draft response (next steps in English, to be translated below)
