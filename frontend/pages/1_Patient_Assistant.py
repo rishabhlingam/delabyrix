@@ -115,7 +115,11 @@ st.markdown("---")
 # ── Mode selector ─────────────────────────────────────────────────────────────
 mode = st.radio(
     "What do you need help with?",
-    ["📋 Load a Consent / Billing Document", "💬 Ask a Clinical Question"],
+    [
+        "📋 Load a Consent / Billing Document",
+        "📄 Upload Custom Document (.txt / .pdf)",
+        "💬 Ask a Clinical Question",
+    ],
     horizontal=True,
 )
 
@@ -138,6 +142,66 @@ if mode == "📋 Load a Consent / Billing Document":
                 st.error(f"Error fetching document: {resp.status_code} — {resp.text}")
         except requests.exceptions.ConnectionError:
             st.error("⚠️ Cannot reach the backend. Is `uvicorn backend.main:app` running?")
+
+# ── Custom document upload mode ───────────────────────────────────────────────
+elif mode == "📄 Upload Custom Document (.txt / .pdf)":
+    uploaded_file = st.file_uploader(
+        "Choose a consent form or hospital bill",
+        type=["txt", "pdf"],
+        help="Supports plain text (.txt) and PDF (.pdf) files up to 10 MB.",
+    )
+
+    if uploaded_file is not None:
+        analyze_clicked = st.button("🔍 Analyze Document")
+        if analyze_clicked:
+            with st.spinner("Extracting text, redacting PII, and analyzing clauses…"):
+                try:
+                    resp = requests.post(
+                        f"{API_BASE}/documents/analyze",
+                        files={"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)},
+                        data={"source_language": language_code, "country": country_code},
+                        timeout=120,
+                    )
+                    if resp.status_code == 200:
+                        result = resp.json()
+
+                        # PII badge
+                        if result.get("pii_redacted"):
+                            st.info(
+                                "🔒 **PII Redacted** — Personal identifiers were detected and "
+                                "masked before sending to the AI model.",
+                                icon="🔒",
+                            )
+
+                        # Redacted preview
+                        with st.expander("📝 Redacted Document Preview (first 500 chars)"):
+                            st.text(result.get("redacted_preview", ""))
+
+                        # Clause breakdown
+                        st.markdown("---")
+                        st.subheader("📋 Clause-by-Clause Breakdown")
+                        st.markdown(
+                            f"**File:** `{result['filename']}` &nbsp;|&nbsp; "
+                            f"**Language:** `{result['detected_language']}` &nbsp;|&nbsp; "
+                            f"**Jurisdiction:** `{result['jurisdiction']}`"
+                        )
+                        st.markdown("---")
+                        st.write(result.get("analysis", ""))
+                    else:
+                        try:
+                            detail = resp.json().get("detail", resp.text)
+                        except Exception:
+                            detail = resp.text
+                        st.error(f"Analysis failed ({resp.status_code}): {detail}")
+                except requests.exceptions.ConnectionError:
+                    st.error(
+                        "⚠️ Cannot reach the backend. "
+                        "Is `uvicorn backend.main:app` running?"
+                    )
+                except requests.exceptions.Timeout:
+                    st.error("⚠️ Request timed out. The document may be too large.")
+    else:
+        st.caption("Upload a .txt or .pdf file above to get started.")
 
 # ── Free-text clinical query mode ─────────────────────────────────────────────
 else:

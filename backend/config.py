@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     # ── Synthetic data ────────────────────────────────────────────────────────
     synthetic_data_dir: str = Field(default="synthetic_data")
 
+    # ── HITL persistence ──────────────────────────────────────────────────────
+    hitl_db_path: str = Field(default="data/hitl_queue.db")
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

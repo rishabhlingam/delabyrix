@@ -41,3 +41,6 @@ htmlcov/
 Thumbs.db
 
 .venv/
+
+# -- HITL SQLite persistence (runtime data, never committed)
+data/

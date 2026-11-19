@@ -3,3 +3,5 @@ secrets/
 *.key
 config/credentials.json
 .venv/
+
+data/
