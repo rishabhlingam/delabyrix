@@ -1,8 +1,8 @@
 # Multilingual Clinical AI Agent & BI Platform — Architecture
 
 > **Role**: Principal Healthcare Solutions Architect
-> **Status**: MVP Design — No source code written yet
-> **Constraint**: Zero real PII; IBM watsonx.ai (`ibm/granite-3-8b-instruct`) + watsonx Orchestrate; Python FastAPI backend; Streamlit multi-page frontend
+> **Status**: MVP Implemented
+> **Constraint**: Zero real PII; IBM watsonx.ai (`ibm/granite-4-h-small` · `/ml/v1/text/chat`) + watsonx Orchestrate; Python FastAPI backend; Streamlit multi-page frontend
 
 ---
 
@@ -75,13 +75,13 @@ delabyrix/
 │   │
 │   ├── watsonx/                      # IBM watsonx integration layer
 │   │   ├── __init__.py
-│   │   ├── client.py                 # watsonx.ai REST client wrapper
-│   │   └── orchestrate_adapter.py   # OpenAPI 3.0 contract bridge to Orchestrate
+│   │   ├── client.py                 # watsonx.ai REST client (ibm/granite-4-h-small)
+│   │   └── orchestrate_adapter.py   # OpenAPI 3.0 contract bridge — 8 skills
 │   │
 │   └── routers/                      # FastAPI route definitions
 │       ├── agent.py                  # POST /agent/query — main agentic pipeline entry
-│       ├── registry.py               # GET /registry/* — medication registry queries
-│       ├── documents.py              # GET/POST /documents/* — consent/billing docs
+│       ├── registry.py               # GET/POST /registry/* — query, sync, changelog
+│       ├── documents.py              # GET/POST /documents/* — consent docs + upload
 │       ├── hitl.py                   # (re-exports from hitl/router.py)
 │       └── analytics.py              # (re-exports from analytics/router.py)
 │
@@ -552,18 +552,24 @@ All endpoints are served by the FastAPI backend. Base URL: `http://localhost:800
 
 ## 7. watsonx Orchestrate Integration
 
-The `orchestrate/openapi_spec.yaml` file exports the following endpoints as skills for watsonx Orchestrate:
+The `orchestrate/openapi_spec.yaml` file (v0.2.0) exports the following endpoints as skills for watsonx Orchestrate:
 
 | Skill Name | Endpoint | Method |
 |---|---|---|
 | `clinical_query` | `/agent/query` | POST |
 | `medication_check` | `/registry/check` | GET |
 | `get_consent_document` | `/documents/{doc_type}/{language}` | GET |
+| `analyze_document` | `/documents/analyze` | POST |
 | `get_dashboard_metrics` | `/analytics/dashboard` | GET |
+| `sync_registry_bulletin` | `/registry/sync` | POST |
+| `get_registry_changelog` | `/registry/changelog` | GET |
+| `get_registry_list` | `/registry/list` | GET |
 
-The spec uses OpenAPI 3.0 format with `x-ibm-nl-intent` extension annotations on each operation to enable natural-language skill invocation inside Orchestrate.
+The spec uses OpenAPI 3.0 format with `x-ibm-nl-intent` extension annotations on each operation to enable natural-language skill invocation inside Orchestrate. All operations carry a `snake_case` `operationId` and an LLM-friendly `description`.
 
-Authentication in the OpenAPI spec uses an `apiKey` security scheme (header: `X-API-Key`) for MVP. The actual key value is kept in `.env` and never committed.
+Authentication in the OpenAPI spec uses an `apiKey` security scheme (header: `X-API-Key`). The actual key value is kept in `.env` and never committed.
+
+**LLM**: `ibm/granite-4-h-small` via `/ml/v1/text/chat`.
 
 ---
 
@@ -598,15 +604,74 @@ The resolver is deterministic (no LLM call) — it uses a static lookup table in
 | Principle | Implementation |
 |---|---|
 | Zero real PII in development | All dev/test data is synthetic; generator runs locally |
-| PII redaction before LLM calls | Stage 0 strips PII before any text reaches watsonx.ai |
+| PII redaction before LLM calls | Stage 0 strips PII before any text reaches watsonx.ai — including user-uploaded documents (`POST /documents/analyze`) |
 | Redaction map stored separately | Only the session manager holds the mapping; never logged |
-| BI dashboards aggregate-only | Analytics pipeline never receives raw query text |
+| BI dashboards aggregate-only | Analytics pipeline never receives raw query text; `proactive_recommendations` contain only statistical aggregates |
 | `.env` for all secrets | watsonx API key, project ID never in source control |
-| HITL queue holds minimal data | Only pipeline trace and draft response, not raw input |
+| HITL queue holds minimal data | SQLite-backed (`HITL_DB_PATH`); stores only pipeline trace and draft response, not raw input |
+| Dynamic registry sync audited | Every `POST /registry/sync` call writes a versioned changelog entry with before/after field diffs |
 
 ---
 
-## 11. Phased Implementation Todo List
+## 11. New Capabilities
+
+### 11a. Custom Document Upload & PII-Safe Clause Breakdown
+
+**Endpoint**: `POST /documents/analyze`
+
+Accepts a `.txt` or `.pdf` file upload. Pipeline:
+1. Text extraction (`.txt` decoded UTF-8; `.pdf` text extracted via pypdf).
+2. Stage 0 PII redaction — SSNs, emails, phone numbers, DOBs replaced with
+   typed placeholders before the LLM sees any text.
+3. `ibm/granite-4-h-small` clause analysis via `/ml/v1/text/chat`.
+4. JSON response: `filename`, `detected_language`, `jurisdiction`,
+   `pii_redacted` (bool), `redacted_preview` (first 500 chars), `analysis`.
+
+Returns HTTP 400 for empty files, whitespace-only content, unsupported types
+(`.docx` etc.), or corrupt PDF bytes.
+
+### 11b. SQLite HITL Persistence
+
+**Config**: `HITL_DB_PATH` (default: `data/hitl_queue.db`)
+
+`HITLQueue` is backed by SQLite (WAL mode, thread-safe). Features:
+- Review items survive server restarts.
+- Parent directory created automatically.
+- In-memory mode (`db_path=":memory:"`) used in tests for full isolation.
+- Thread-safety tested with 50 concurrent enqueues.
+
+### 11c. Dynamic Registry Sync & Changelog
+
+**Endpoints**: `POST /registry/sync`, `GET /registry/changelog`
+
+`apply_bulletin(medication_id, source, updates)` applies a field-level diff
+to a registry record and writes a versioned changelog entry:
+- `sync_version`: monotonically incrementing (`v1`, `v2`, …).
+- `changes`: list of `{field, old_value, new_value, medication_id}` diffs.
+- `last_updated` is always stamped.
+- Immutable fields (`name_generic`, `name_brand`) are rejected with HTTP 400.
+- Unknown fields are silently skipped.
+
+`GET /registry/changelog?limit=N` returns entries newest-first.
+
+### 11d. Zero-PII Proactive Care Pattern Analytics
+
+**Field**: `proactive_recommendations` in `GET /analytics/dashboard` response.
+
+`_build_proactive_recommendations(patient_logs)` scans anonymized patient logs
+and generates zero-PII pattern insights in three categories:
+- `dietary` — dietary flags (halal, kosher, etc.) appearing ≥ 2 times.
+- `icd10_cluster` — ICD-10 chapter codes appearing ≥ 2 times, with
+  human-readable chapter labels (e.g. "E00-E89 → Endocrine & Metabolic").
+- `medication_conflict` — medications flagged as banned/restricted in at least
+  one jurisdiction, appearing ≥ 2 times.
+
+Results are sorted by `magnitude` (patient count) descending. No patient IDs,
+SSNs, or raw text appear in any recommendation field.
+
+---
+
+## 12. Phased Implementation Todo List
 
 ### Phase 1 — Project Scaffold & Synthetic Data
 
@@ -630,7 +695,7 @@ The resolver is deterministic (no LLM call) — it uses a static lookup table in
 
 ### Phase 3 — watsonx Integration Layer
 
-- [ ] Implement `backend/watsonx/client.py` — wrap ibm-watsonx-ai SDK calls for `ibm/granite-3-8b-instruct`
+- [ ] Implement `backend/watsonx/client.py` — wrap ibm-watsonx-ai SDK calls for `ibm/granite-4-h-small`
 - [ ] Implement `backend/config.py` — load watsonx project ID, API key, endpoint from `.env`
 - [ ] Validate connectivity: test client can call watsonx.ai and receive a response
 - [ ] Implement `backend/watsonx/orchestrate_adapter.py` — thin adapter that formats requests for Orchestrate compatibility
@@ -672,9 +737,9 @@ The resolver is deterministic (no LLM call) — it uses a static lookup table in
 
 ### Phase 8 — watsonx Orchestrate Export
 
-- [ ] Write `orchestrate/openapi_spec.yaml` — OpenAPI 3.0 spec covering 4 Orchestrate skills
+- [ ] Write `orchestrate/openapi_spec.yaml` — OpenAPI 3.0 spec covering 8 Orchestrate skills
 - [ ] Annotate each operation with `x-ibm-nl-intent` for Orchestrate natural-language invocation
-- [ ] Validate spec with OpenAPI linter
+- [ ] Validate spec with OpenAPI linter (see `tests/test_openapi_validation.py`)
 
 ### Phase 9 — Integration Testing & Hardening
 
@@ -686,16 +751,18 @@ The resolver is deterministic (no LLM call) — it uses a static lookup table in
 
 ---
 
-## 12. Key Design Decisions
+## 13. Key Design Decisions
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| LLM | ibm/granite-3-8b-instruct via watsonx.ai | Per constraint; appropriate size for structured medical prompting |
+| LLM | `ibm/granite-4-h-small` via `/ml/v1/text/chat` | Per constraint; appropriate size for structured medical prompting |
 | Pipeline pattern | Sequential stages, not a single LLM call | Auditability, HITL insertion points, testability |
-| HITL queue | In-memory list (MVP) | Simplest viable; documented upgrade path to Redis for production |
-| Registry sync | File-based reload from synthetic_data/ | Simulates scheduled sync without external dependencies |
+| HITL queue | SQLite (WAL mode) | Persistence across restarts; thread-safe; zero extra infrastructure; in-memory mode for tests |
+| Document upload | `.txt` / `.pdf` only; PII-redacted before LLM | Covers the most common clinical document formats while enforcing Stage 0 |
+| Registry sync | Versioned in-memory bulletins + changelog | Simulates real-world regulatory feed updates; auditable without external infra |
+| Proactive analytics | Aggregate-only over anonymized logs | Zero PII; actionable care coordination insights without exposing patient data |
 | Jurisdiction resolver | Deterministic static table | No LLM latency for a compliance-critical decision |
-| PII redaction | Inline Stage 0 before all LLM calls | Privacy by design; not a post-processing filter |
+| PII redaction | Inline Stage 0 before all LLM calls | Privacy by design; applies to both pipeline queries and uploaded documents |
 | Frontend | Streamlit multi-page | Fastest path to multi-role UI; no JS build tooling required |
 | Analytics isolation | Separate aggregator; raw text never enters analytics | BI data pipeline and patient agent are architecturally separate per AGENTS.md |
 | Secrets | `.env` only; `.env.example` committed | `.bobignore` already excludes `.env`; no credentials in source |

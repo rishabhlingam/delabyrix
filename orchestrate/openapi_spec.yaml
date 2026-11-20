@@ -3,17 +3,23 @@ openapi: "3.0.3"
 info:
   title: "Multilingual Clinical AI Agent — watsonx Orchestrate Skills"
   description: |
-    OpenAPI specification exporting four clinical AI skills for IBM watsonx
+    OpenAPI specification exporting eight clinical AI skills for IBM watsonx
     Orchestrate natural-language invocation.
 
     **Skills exported:**
-    - `clinical_query`         — POST /agent/query
-    - `medication_check`       — GET  /registry/check
-    - `get_consent_document`   — GET  /documents/{doc_type}/{language}
-    - `get_dashboard_metrics`  — GET  /analytics/dashboard
+    - `clinical_query`           — POST /agent/query
+    - `medication_check`         — GET  /registry/check
+    - `get_consent_document`     — GET  /documents/{doc_type}/{language}
+    - `analyze_document`         — POST /documents/analyze
+    - `get_dashboard_metrics`    — GET  /analytics/dashboard
+    - `sync_registry_bulletin`   — POST /registry/sync
+    - `get_registry_changelog`   — GET  /registry/changelog
+    - `get_registry_list`        — GET  /registry/list
 
     Authentication: `X-API-Key` header (key stored in `.env`, never committed).
-  version: "0.1.0"
+
+    **LLM**: `ibm/granite-4-h-small` via `/ml/v1/text/chat`.
+  version: "0.2.0"
   contact:
     name: "Clinical AI Platform Team"
 
@@ -36,6 +42,195 @@ components:
         Never commit the actual key to source control.
 
   schemas:
+    DocumentAnalyzeResponse:
+      type: object
+      description: >
+        Result of uploading a .txt or .pdf document for PII-safe clause
+        breakdown.  Raw PII is redacted (Stage 0) before the LLM sees any text;
+        the response never contains the original PII values.
+      properties:
+        filename:
+          type: string
+          example: "consent_surgery.txt"
+        detected_language:
+          type: string
+          description: "BCP-47 language tag supplied by the caller"
+          example: "en"
+        jurisdiction:
+          type: string
+          description: "ISO 3166-1 alpha-2 country code supplied by the caller"
+          example: "US"
+        pii_redacted:
+          type: boolean
+          description: "True when at least one PII pattern was found and replaced"
+          example: false
+        redacted_preview:
+          type: string
+          description: "First 500 chars of the PII-redacted text (safe to display)"
+          example: "Patient agrees to ICU admission on [DATE]."
+        analysis:
+          type: string
+          description: "LLM-generated clause-by-clause breakdown of the document"
+          example: "Section 1 — Admission consent: patient authorises the care team..."
+      required:
+        - filename
+        - detected_language
+        - jurisdiction
+        - pii_redacted
+        - redacted_preview
+        - analysis
+
+    RegistrySyncRequest:
+      type: object
+      description: "Bulletin payload for a versioned in-memory registry update."
+      properties:
+        medication_id:
+          type: string
+          format: uuid
+          description: "UUID of the medication record to update"
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        source:
+          type: string
+          description: "Registry source issuing the bulletin"
+          example: "FDA Orange Book"
+        updates:
+          type: object
+          description: >
+            Field→value pairs to apply.  Only mutable fields are accepted:
+            `status`, `restriction_reason`, `therapeutic_alternatives`,
+            `last_updated`.  `name_generic` and `name_brand` are immutable.
+          additionalProperties: true
+          example:
+            status: "restricted"
+            restriction_reason: "Safety review pending."
+      required:
+        - medication_id
+        - source
+        - updates
+
+    RegistrySyncResponse:
+      type: object
+      description: "Changelog entry produced by a successful bulletin application."
+      properties:
+        sync_version:
+          type: string
+          description: "Monotonically incrementing version token (e.g. v3)"
+          example: "v3"
+        timestamp:
+          type: string
+          format: date-time
+        source:
+          type: string
+          example: "FDA Orange Book"
+        changes:
+          type: array
+          items:
+            type: object
+            properties:
+              medication_id:
+                type: string
+              field:
+                type: string
+              old_value: {}
+              new_value: {}
+      required:
+        - sync_version
+        - timestamp
+        - source
+        - changes
+
+    ChangelogEntry:
+      type: object
+      properties:
+        sync_version:
+          type: string
+          example: "v2"
+        timestamp:
+          type: string
+          format: date-time
+        source:
+          type: string
+          example: "EU Union Register"
+        changes:
+          type: array
+          items:
+            type: object
+      required:
+        - sync_version
+        - timestamp
+        - source
+        - changes
+
+    ChangelogResponse:
+      type: object
+      properties:
+        total_entries:
+          type: integer
+          example: 5
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChangelogEntry"
+      required:
+        - total_entries
+        - entries
+
+    ProactiveRecommendation:
+      type: object
+      description: >
+        A zero-PII care pattern insight derived from aggregated, anonymized
+        patient-log data.  No patient identifiers, raw query text, or SSN/DOB
+        values appear in this object — only statistical summaries.
+      properties:
+        category:
+          type: string
+          description: "Pattern category"
+          enum: ["dietary", "icd10_cluster", "medication_conflict"]
+          example: "dietary"
+        title:
+          type: string
+          example: "Halal dietary requirement — 5 patients"
+        description:
+          type: string
+          example: "5 patients from SA require halal-certified meals."
+        affected_groups:
+          type: array
+          items:
+            type: string
+          example: ["SA", "outpatient"]
+        magnitude:
+          type: integer
+          description: "Number of patients triggering this pattern"
+          example: 5
+      required:
+        - category
+        - title
+        - description
+        - affected_groups
+        - magnitude
+
+    RegistryListResponse:
+      type: object
+      properties:
+        total:
+          type: integer
+          example: 50
+        page:
+          type: integer
+          example: 1
+        page_size:
+          type: integer
+          example: 20
+        records:
+          type: array
+          items:
+            $ref: "#/components/schemas/RegistryCheckResponse"
+      required:
+        - total
+        - page
+        - page_size
+        - records
+
     PipelineTrace:
       type: object
       description: "Stage-by-stage pipeline output — no raw PII"
@@ -223,7 +418,8 @@ components:
       description: >
         Aggregated BI metrics — strictly no raw query text or patient PII.
         Combines anonymized synthetic patient log baseline with live interaction
-        telemetry.
+        telemetry.  Also includes zero-PII proactive care pattern analytics
+        derived from anonymized patient logs.
       properties:
         total_queries:
           type: integer
@@ -265,6 +461,13 @@ components:
           example:
             US_FDA: 120
             EU_EMA: 85
+        proactive_recommendations:
+          type: array
+          description: >
+            Zero-PII care pattern insights sorted by magnitude (highest first).
+            Derived from aggregated, anonymized patient logs only.
+          items:
+            $ref: "#/components/schemas/ProactiveRecommendation"
       required:
         - total_queries
         - escalation_rate
@@ -273,6 +476,7 @@ components:
         - top_medication_flags
         - avg_pipeline_stages_completed
         - jurisdiction_breakdown
+        - proactive_recommendations
 
 paths:
   /agent/query:
@@ -426,20 +630,27 @@ paths:
   /analytics/dashboard:
     get:
       operationId: get_dashboard_metrics
-      summary: "Return aggregated, anonymized BI dashboard metrics"
+      summary: "Return aggregated, anonymized BI dashboard metrics with proactive recommendations"
       description: |
         Returns aggregate interaction metrics for the BI dashboard.
         Combines anonymized synthetic patient log baseline trends with live
-        interaction telemetry.
+        interaction telemetry.  The response also includes zero-PII proactive
+        care pattern analytics (`proactive_recommendations`) derived from
+        aggregated patient logs — covering dietary requirements, ICD-10
+        condition clusters, and cross-jurisdiction medication conflicts.
 
         **Privacy guarantee**: raw query text and patient identifiers are NEVER
         present in this response. Only language codes, user-type counts,
-        medication INN names, and boolean escalation flags are aggregated.
+        medication INN names, boolean escalation flags, and statistical
+        aggregates are returned.
+
+        **Model**: `ibm/granite-4-h-small` via `/ml/v1/text/chat`.
       x-ibm-nl-intent: >
         Use this skill when a care coordinator or administrator wants to see
         overall system usage statistics, escalation rates, top flagged
-        medications, language distribution, or jurisdiction breakdown of
-        clinical queries processed by the platform.
+        medications, language distribution, jurisdiction breakdown, or
+        proactive care pattern insights derived from anonymized patient logs.
+        Never returns raw patient text or identifiers.
       tags:
         - analytics
       parameters:
@@ -468,10 +679,225 @@ paths:
             enum: ["US_FDA", "EU_EMA"]
       responses:
         "200":
-          description: "Dashboard metrics"
+          description: "Dashboard metrics including proactive care recommendations"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/DashboardResponse"
+        "422":
+          description: "Validation error"
+
+  /documents/analyze:
+    post:
+      operationId: analyze_document
+      summary: "Upload a .txt or .pdf document for PII-safe clause breakdown"
+      description: |
+        Accept a `.txt` or `.pdf` file upload and return a structured,
+        LLM-generated clause-by-clause breakdown.
+
+        Pipeline: file → text extraction → PII redaction (Stage 0, inline) →
+        Granite 4 clause analysis (`ibm/granite-4-h-small` via `/ml/v1/text/chat`)
+        → structured JSON response.
+
+        **PII safety**: the original file text is redacted before it reaches the
+        LLM.  SSNs, emails, phone numbers, and dates-of-birth are replaced with
+        typed placeholders (e.g. `[SSN]`).  The raw values never appear in the
+        response.
+
+        Returns HTTP 400 for empty files, whitespace-only content, unsupported
+        file types (anything other than `.txt` / `.pdf`), or corrupt PDF bytes.
+      x-ibm-nl-intent: >
+        Use this skill when a patient, provider, or coordinator uploads a
+        consent form, billing statement, or other clinical document (.txt or .pdf)
+        and needs a plain-language, clause-by-clause explanation. The skill
+        automatically redacts PII before analysis. Use it in place of
+        get_consent_document when the document originates from the user rather
+        than the system document library.
+      tags:
+        - documents
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: "The document to analyze (.txt or .pdf, ≤ 5 MB)"
+                source_language:
+                  type: string
+                  description: "BCP-47 language tag for the document"
+                  default: "en"
+                  enum: ["en", "es", "hi"]
+                country:
+                  type: string
+                  description: "ISO 3166-1 alpha-2 country code (determines jurisdiction)"
+                  default: "US"
+                  example: "US"
+      responses:
+        "200":
+          description: "Document analyzed successfully"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentAnalyzeResponse"
+        "400":
+          description: "Empty file, unsupported extension, whitespace-only content, or corrupt PDF"
+        "422":
+          description: "Validation error"
+
+  /registry/sync:
+    post:
+      operationId: sync_registry_bulletin
+      summary: "Apply a versioned regulatory bulletin to the in-memory medication registry"
+      description: |
+        Apply a field-level update bulletin to a single medication record in
+        the in-memory cross-border registry.  Each successful call increments the
+        changelog version (`v1`, `v2`, …) and records the before/after field
+        diff for audit.
+
+        Only mutable fields are accepted: `status`, `restriction_reason`,
+        `therapeutic_alternatives`, `last_updated`.  Attempts to update
+        `name_generic` or `name_brand` are rejected with HTTP 400.
+
+        Returns HTTP 404 when `medication_id` does not match any registry record.
+        Returns HTTP 400 when the payload contains only immutable fields (no
+        effective change possible).
+      x-ibm-nl-intent: >
+        Use this skill when a regulatory bulletin from the FDA Orange Book or
+        EU Union Register needs to be applied to the live medication registry.
+        Provide the medication UUID, the source registry name, and the field
+        updates to apply.  The skill returns the versioned changelog entry
+        describing exactly what changed.
+      tags:
+        - registry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegistrySyncRequest"
+            examples:
+              fda_status_change:
+                summary: "FDA bulletin restricting a medication"
+                value:
+                  medication_id: "550e8400-e29b-41d4-a716-446655440000"
+                  source: "FDA Orange Book"
+                  updates:
+                    status: "restricted"
+                    restriction_reason: "Safety review pending Q3 2026."
+              eu_withdrawal:
+                summary: "EMA bulletin delisting a medication"
+                value:
+                  medication_id: "661e9511-f30c-52e5-b827-557766551111"
+                  source: "EU Union Register"
+                  updates:
+                    status: "delisted"
+                    restriction_reason: "Withdrawn from EU market by manufacturer."
+      responses:
+        "200":
+          description: "Bulletin applied — changelog entry returned"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegistrySyncResponse"
+        "400":
+          description: "No mutable fields in updates payload"
+        "404":
+          description: "medication_id not found in registry"
+        "422":
+          description: "Validation error"
+
+  /registry/changelog:
+    get:
+      operationId: get_registry_changelog
+      summary: "Retrieve the versioned registry sync changelog"
+      description: |
+        Returns the ordered history of regulatory bulletin applications,
+        newest first.  Each entry describes which fields changed, the old
+        and new values, the source registry, and the monotonic version token.
+
+        Use `limit` to cap the number of returned entries (default: all).
+        `total_entries` always reflects the full changelog length regardless
+        of `limit`.
+      x-ibm-nl-intent: >
+        Use this skill when a care coordinator or compliance officer needs to
+        audit recent changes to the medication registry — for example, to
+        verify that an FDA or EMA bulletin was applied correctly, or to review
+        the history of status changes for a specific medication.
+      tags:
+        - registry
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: "Maximum number of changelog entries to return (newest first)"
+          schema:
+            type: integer
+            minimum: 1
+          example: 10
+      responses:
+        "200":
+          description: "Changelog entries returned"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChangelogResponse"
+        "422":
+          description: "Validation error"
+
+  /registry/list:
+    get:
+      operationId: get_registry_list
+      summary: "List all medication registry records with optional pagination and jurisdiction filter"
+      description: |
+        Returns a paginated list of all medication records in the in-memory
+        cross-border registry.  Supports filtering by jurisdiction and
+        standard page/page_size pagination.
+      x-ibm-nl-intent: >
+        Use this skill when a care coordinator or compliance officer needs to
+        browse the full medication registry, optionally filtered to a specific
+        regulatory jurisdiction (US_FDA or EU_EMA). Returns paginated results
+        with total count, page number, and the list of medication records.
+      tags:
+        - registry
+      parameters:
+        - name: jurisdiction
+          in: query
+          required: false
+          description: "Filter by regulatory jurisdiction"
+          schema:
+            type: string
+            enum: ["US_FDA", "EU_EMA"]
+        - name: page
+          in: query
+          required: false
+          description: "Page number (1-based)"
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+          example: 1
+        - name: page_size
+          in: query
+          required: false
+          description: "Records per page"
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+          example: 20
+      responses:
+        "200":
+          description: "Paginated registry records"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegistryListResponse"
         "422":
           description: "Validation error"

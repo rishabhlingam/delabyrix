@@ -7,11 +7,15 @@ watsonx Orchestrate skill invocation contract (architecture.md §7).
 Responsibilities
 ────────────────
 * Wraps ``WatsonxClient.generate()`` with Orchestrate-compatible input/output.
-* Provides structured skill payloads for the four exported endpoints:
-    - clinical_query        (POST /agent/query)
-    - medication_check      (GET /registry/check)
-    - get_consent_document  (GET /documents/{doc_type}/{language})
-    - get_dashboard_metrics (GET /analytics/dashboard)
+* Provides structured skill payloads for all exported endpoints:
+    - clinical_query          (POST /agent/query)
+    - medication_check        (GET  /registry/check)
+    - get_consent_document    (GET  /documents/{doc_type}/{language})
+    - analyze_document        (POST /documents/analyze)
+    - get_dashboard_metrics   (GET  /analytics/dashboard)
+    - sync_registry_bulletin  (POST /registry/sync)
+    - get_registry_changelog  (GET  /registry/changelog)
+    - get_registry_list       (GET  /registry/list)
 * Never touches credentials directly — delegates to WatsonxClient.
 
 This module is intentionally light: heavy pipeline logic lives in
@@ -40,7 +44,7 @@ class OrchestrateSkillRequest:
 
     Attributes
     ──────────
-    skill_name  : One of the four exported skill names (e.g. 'clinical_query').
+    skill_name  : One of the exported skill names (e.g. 'clinical_query').
     parameters  : Raw parameter dict as received from Orchestrate.
     session_id  : Optional session continuity token.
     """
@@ -132,7 +136,11 @@ class OrchestrateAdapter:
             "clinical_query": self._handle_clinical_query,
             "medication_check": self._handle_medication_check,
             "get_consent_document": self._handle_get_consent_document,
+            "analyze_document": self._handle_analyze_document,
             "get_dashboard_metrics": self._handle_get_dashboard_metrics,
+            "sync_registry_bulletin": self._handle_sync_registry_bulletin,
+            "get_registry_changelog": self._handle_get_registry_changelog,
+            "get_registry_list": self._handle_get_registry_list,
         }
         handler = handlers.get(request.skill_name)
         if handler is None:
@@ -213,14 +221,42 @@ class OrchestrateAdapter:
             mock=self._client.is_mock,
         )
 
+    def _handle_analyze_document(
+        self, request: OrchestrateSkillRequest
+    ) -> OrchestrateSkillResponse:
+        """
+        Return a pointer to the document analysis endpoint for Orchestrate.
+
+        The actual analysis (PII redaction → Granite 4 clause breakdown) is
+        performed by POST /documents/analyze; this skill returns the endpoint
+        reference and echoes the caller-supplied metadata so Orchestrate can
+        construct a multipart/form-data request.
+        """
+        p = request.parameters
+        return OrchestrateSkillResponse(
+            skill_name=request.skill_name,
+            result={
+                "endpoint": "/documents/analyze",
+                "source_language": p.get("source_language", "en"),
+                "country": p.get("country", "US"),
+                "note": (
+                    "Submit a multipart/form-data POST with field 'file' "
+                    "(.txt or .pdf) to this endpoint."
+                ),
+            },
+            confidence=1.0,
+            mock=self._client.is_mock,
+        )
+
     def _handle_get_dashboard_metrics(
         self, request: OrchestrateSkillRequest
     ) -> OrchestrateSkillResponse:
         """
         Return a pointer to the analytics endpoint for Orchestrate.
 
-        Full metric aggregation is handled by backend/analytics/; this skill
-        returns the endpoint reference so Orchestrate can retrieve live data.
+        Full metric aggregation (including proactive_recommendations) is
+        handled by backend/analytics/; this skill returns the endpoint
+        reference so Orchestrate can retrieve live data.
         """
         p = request.parameters
         params: Dict[str, str] = {}
@@ -235,6 +271,81 @@ class OrchestrateAdapter:
             skill_name=request.skill_name,
             result={
                 "endpoint": "/analytics/dashboard",
+                "params": params,
+            },
+            confidence=1.0,
+            mock=self._client.is_mock,
+        )
+
+    def _handle_sync_registry_bulletin(
+        self, request: OrchestrateSkillRequest
+    ) -> OrchestrateSkillResponse:
+        """
+        Return a pointer to the registry sync endpoint for Orchestrate.
+
+        The actual bulletin application (versioned in-memory update + changelog
+        entry) is performed by POST /registry/sync; this skill echoes the
+        bulletin payload so Orchestrate can POST it directly.
+        """
+        p = request.parameters
+        return OrchestrateSkillResponse(
+            skill_name=request.skill_name,
+            result={
+                "endpoint": "/registry/sync",
+                "medication_id": p.get("medication_id"),
+                "source": p.get("source"),
+                "updates": p.get("updates", {}),
+            },
+            confidence=1.0,
+            mock=self._client.is_mock,
+        )
+
+    def _handle_get_registry_changelog(
+        self, request: OrchestrateSkillRequest
+    ) -> OrchestrateSkillResponse:
+        """
+        Return a pointer to the registry changelog endpoint for Orchestrate.
+
+        Full changelog retrieval is handled by GET /registry/changelog; this
+        skill returns the endpoint reference with any supplied query parameters.
+        """
+        p = request.parameters
+        params: Dict[str, str] = {}
+        if p.get("limit"):
+            params["limit"] = str(p["limit"])
+
+        return OrchestrateSkillResponse(
+            skill_name=request.skill_name,
+            result={
+                "endpoint": "/registry/changelog",
+                "params": params,
+            },
+            confidence=1.0,
+            mock=self._client.is_mock,
+        )
+
+    def _handle_get_registry_list(
+        self, request: OrchestrateSkillRequest
+    ) -> OrchestrateSkillResponse:
+        """
+        Return a pointer to the registry list endpoint for Orchestrate.
+
+        Full paginated registry listing is handled by GET /registry/list; this
+        skill returns the endpoint reference with the caller-supplied filters.
+        """
+        p = request.parameters
+        params: Dict[str, str] = {}
+        if p.get("jurisdiction"):
+            params["jurisdiction"] = p["jurisdiction"]
+        if p.get("page"):
+            params["page"] = str(p["page"])
+        if p.get("page_size"):
+            params["page_size"] = str(p["page_size"])
+
+        return OrchestrateSkillResponse(
+            skill_name=request.skill_name,
+            result={
+                "endpoint": "/registry/list",
                 "params": params,
             },
             confidence=1.0,

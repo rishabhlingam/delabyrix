@@ -31,7 +31,7 @@ at 3 AM.
 Delabyrix is a **multi-stage agentic pipeline** (not a chatbot) that:
 
 1. **Strips PII inline** before any text touches an LLM.
-2. **Translates** the user's query into English using IBM Granite 3.
+2. **Translates** the user's query into English using IBM Granite 4.
 3. **Interprets clinical meaning** — extracts medical concepts and cross-checks
    the cross-border medication registry for banned or restricted drugs.
 4. **Adds cultural and jurisdictional context** — adapts the framing to the
@@ -56,11 +56,11 @@ never enter the analytics pipeline.
 | Component | Technology |
 |---|---|
 | AI development partner | **IBM Bob IDE** (architecture design, code generation, test writing, compliance review) |
-| LLM inference | **IBM watsonx.ai** · model `ibm/granite-3-8b-instruct` |
+| LLM inference | **IBM watsonx.ai** · model `ibm/granite-4-h-small` · endpoint `/ml/v1/text/chat` |
 | Skill orchestration | **IBM watsonx Orchestrate** · OpenAPI 3.0 skill export (`orchestrate/openapi_spec.yaml`) |
 | Backend API | **FastAPI** (Python) · served via Uvicorn on port 8000 |
 | Frontend | **Streamlit** multi-page application (5 pages) |
-| Data layer | Synthetic datasets (zero real PII) · in-memory HITL queue |
+| Data layer | Synthetic datasets (zero real PII) · SQLite-backed HITL persistence (`HITL_DB_PATH`) |
 
 ### Architecture Overview
 
@@ -78,13 +78,13 @@ never enter the analytics pipeline.
 │  ┌──────────┐  ┌────────────┐  ┌──────────────┐  ┌──────────────┐  │
 │  │Stage 0   │→ │Stage 1     │→ │Stage 2       │→ │Stage 3       │  │
 │  │PII       │  │Translate   │  │Medical       │  │Cultural      │  │
-│  │Redaction │  │(Granite 3) │  │Interpret +   │  │Context       │  │
-│  │          │  │            │  │Registry Chk  │  │(Granite 3)   │  │
+│  │Redaction │  │(Granite 4) │  │Interpret +   │  │Context       │  │
+│  │          │  │            │  │Registry Chk  │  │(Granite 4)   │  │
 │  └──────────┘  └────────────┘  └──────────────┘  └──────────────┘  │
 │                                                   ┌──────────────┐  │
 │                                                   │Stage 4       │  │
 │                                                   │Next Steps    │  │
-│                                                   │(Granite 3)   │  │
+│                                                   │(Granite 4)   │  │
 │                                                   └──────┬───────┘  │
 │                                                          │          │
 │                                               ┌──────────▼───────┐  │
@@ -93,18 +93,21 @@ never enter the analytics pipeline.
 │                                               └──────────┬───────┘  │
 │                                                          │ escalate │
 │                                               ┌──────────▼───────┐  │
-│                                               │ HITL Review Queue│  │
+│                                               │ HITL Queue       │  │
+│                                               │ (SQLite-backed)  │  │
 │                                               └──────────────────┘  │
 │                                                                     │
 │  GET  /registry/check · /registry/list                              │
+│  POST /registry/sync · GET /registry/changelog                      │
 │  GET  /documents/{doc_type}/{language}                              │
+│  POST /documents/analyze   (custom .txt/.pdf upload)                │
 │  GET  /hitl/queue  POST /hitl/approve  POST /hitl/reject            │
-│  GET  /analytics/dashboard                                          │
+│  GET  /analytics/dashboard  (incl. proactive_recommendations)       │
 │  POST /synthetic/generate                                           │
 └──────────────────────────┬──────────────────────────────────────────┘
                            │ IBM watsonx.ai REST API
 ┌──────────────────────────▼──────────────────────────────────────────┐
-│          IBM watsonx.ai  ·  ibm/granite-3-8b-instruct               │
+│   IBM watsonx.ai  ·  ibm/granite-4-h-small  ·  /ml/v1/text/chat    │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -132,7 +135,11 @@ never enter the analytics pipeline.
 | `clinical_query` | POST | `/agent/query` |
 | `medication_check` | GET | `/registry/check` |
 | `get_consent_document` | GET | `/documents/{doc_type}/{language}` |
+| `analyze_document` | POST | `/documents/analyze` |
 | `get_dashboard_metrics` | GET | `/analytics/dashboard` |
+| `sync_registry_bulletin` | POST | `/registry/sync` |
+| `get_registry_changelog` | GET | `/registry/changelog` |
+| `get_registry_list` | GET | `/registry/list` |
 
 Each operation carries an `x-ibm-nl-intent` annotation for natural-language
 invocation inside Orchestrate. The API key is an `X-API-Key` header whose value
@@ -175,7 +182,7 @@ Open `.env` and fill in your values:
 WATSONX_API_KEY=your_ibm_cloud_api_key_here
 WATSONX_PROJECT_ID=your_watsonx_project_id_here
 WATSONX_URL=https://us-south.ml.cloud.ibm.com
-WATSONX_MODEL_ID=ibm/granite-3-8b-instruct
+WATSONX_MODEL_ID=ibm/granite-4-h-small
 
 # Set to true to run fully offline (mock LLM responses):
 WATSONX_MOCK_MODE=false
@@ -187,6 +194,9 @@ API_KEY=your_api_key_for_orchestrate_here
 LOG_LEVEL=INFO
 HITL_CONFIDENCE_THRESHOLD=0.70
 SYNTHETIC_DATA_DIR=synthetic_data
+
+# SQLite persistence for the HITL review queue (directory created automatically):
+HITL_DB_PATH=data/hitl_queue.db
 ```
 
 > **Offline / demo mode**: set `WATSONX_MOCK_MODE=true` to skip all real API
@@ -235,15 +245,75 @@ Streamlit opens at <http://localhost:8501> by default.
 pytest tests/ -v
 ```
 
-All 255 tests run fully offline (mock mode is forced by the test fixtures):
+All tests run fully offline (mock mode is forced by the test fixtures):
 
 | Test file | Coverage |
 |---|---|
 | `tests/test_synthetic.py` | Synthetic data generators |
 | `tests/test_registry.py` | Medication registry query & sync |
+| `tests/test_registry_changelog.py` | Versioned registry sync & changelog API |
 | `tests/test_pipeline.py` | All 5 pipeline stages + HITL escalator |
 | `tests/test_hitl.py` | HITL queue, router, and agent router |
+| `tests/test_hitl_sqlite.py` | SQLite HITL persistence, thread safety, restart survival |
+| `tests/test_document_upload.py` | Custom .txt/.pdf upload & PII-safe clause breakdown |
+| `tests/test_proactive_analytics.py` | Zero-PII proactive care pattern analytics |
 | `tests/test_api_and_e2e.py` | Registry/document/analytics routers, OpenAPI spec, E2E flows |
+| `tests/test_openapi_validation.py` | OpenAPI 3.0 structural validation, unique operationIds, descriptions |
+
+---
+
+## New Capabilities
+
+### 1 · Custom Document Upload & PII-Safe Clause Breakdown (`POST /documents/analyze`)
+
+Patients and providers can upload their own `.txt` or `.pdf` clinical documents
+(consent forms, billing statements, insurance letters) for a plain-language,
+clause-by-clause explanation.
+
+- **PII redaction first**: the uploaded text passes through Stage 0 before any
+  LLM call — SSNs, emails, phone numbers, and DOBs are replaced with typed
+  placeholders (e.g. `[SSN]`).
+- **Supported formats**: `.txt` and `.pdf` (≤ 5 MB). `.docx` and other formats
+  return HTTP 400.
+- **Model**: `ibm/granite-4-h-small` via `/ml/v1/text/chat`.
+- **Response fields**: `filename`, `detected_language`, `jurisdiction`,
+  `pii_redacted` (bool), `redacted_preview`, `analysis`.
+
+### 2 · SQLite HITL Persistence (`HITL_DB_PATH`)
+
+The HITL review queue is now backed by SQLite instead of an in-memory list.
+
+- Review items survive server restarts.
+- Thread-safe concurrent writes (WAL mode).
+- Configured via `HITL_DB_PATH` in `.env` (default: `data/hitl_queue.db`).
+  The parent directory is created automatically.
+- In-memory mode (`HITLQueue(db_path=":memory:")`) is still used in tests for
+  full isolation.
+
+### 3 · Dynamic Registry Sync & Changelog (`POST /registry/sync`, `GET /registry/changelog`)
+
+Regulatory bulletins from the FDA Orange Book or EU Union Register can be
+applied to the live in-memory medication registry without restarting the server.
+
+- Each `POST /registry/sync` call applies a field-level diff to a single
+  medication record and records the before/after change in the versioned changelog.
+- Changelog entries are monotonically versioned (`v1`, `v2`, …) and ordered
+  newest-first.
+- Only mutable fields (`status`, `restriction_reason`, `therapeutic_alternatives`,
+  `last_updated`) are accepted; `name_generic` and `name_brand` are immutable.
+- `GET /registry/changelog?limit=N` returns the audit trail.
+
+### 4 · Zero-PII Proactive Care Pattern Analytics
+
+The `GET /analytics/dashboard` response now includes a `proactive_recommendations`
+array derived from aggregated, anonymized patient logs.
+
+- Three pattern categories: `dietary` (e.g. halal/kosher requirements),
+  `icd10_cluster` (recurring condition groups), `medication_conflict`
+  (cross-jurisdiction drug conflicts).
+- Results are sorted by `magnitude` (patient count) descending.
+- **Privacy guarantee**: no patient IDs, raw query text, SSNs, or DOBs are
+  present. Only statistical aggregates over anonymized synthetic logs.
 
 ---
 
@@ -255,7 +325,7 @@ All 255 tests run fully offline (mock mode is forced by the test fixtures):
 
 ---
 
-### Minute 1 — Patient Assistant: Cross-Border Banned Drug Escalation
+### 0:00–1:00 — Patient Assistant: Cross-Border Banned Drug Escalation
 
 **What to show:**
 
@@ -276,14 +346,14 @@ All 255 tests run fully offline (mock mode is forced by the test fixtures):
 4. Submit. Walk through what happens inside the pipeline (visible in the
    pipeline trace accordion):
    - **Stage 0** — PII redaction: no PII detected, text passes clean.
-   - **Stage 1** — Translation: Granite 3 renders the Spanish query in English.
+   - **Stage 1** — Translation: Granite 4 (`ibm/granite-4-h-small`) renders the Spanish query in English.
    - **Stage 2** — Medical interpretation: the registry lookup finds
      `metamizole` with status `banned` in `US_FDA`; `has_banned_medication = true`.
-   - **Stage 3** — Cultural context: Granite 3 adapts the response for a US
+   - **Stage 3** — Cultural context: Granite 4 adapts the response for a US
      patient under HIPAA.
-   - **Stage 4** — Next steps: Granite 3 recommends therapeutic alternatives
+   - **Stage 4** — Next steps: Granite 4 recommends therapeutic alternatives
      (ibuprofen, acetaminophen) with a culturally appropriate explanation.
-   - **HITL escalator** — Rule 2 fires (banned medication).  
+   - **HITL escalator** — Rule 2 fires (banned medication).
      ➜ The API returns **HTTP 202**. The patient sees a localised notice:
      *"Your query has been referred to a care coordinator for review."*
 
@@ -292,7 +362,34 @@ human oversight is non-negotiable for high-stakes clinical outputs.
 
 ---
 
-### Minute 2 — Provider Support & Registry Explorer
+### 1:00–1:40 — Document Upload & Dynamic Registry Sync
+
+**What to show:**
+
+1. Click **Patient Assistant** and use the **Upload Document** tab.
+
+2. Upload a `.txt` or `.pdf` consent form from your local disk.
+   The API calls `POST /documents/analyze`:
+   - Stage 0 redacts any PII in the uploaded file.
+   - Granite 4 returns a clause-by-clause plain-language breakdown.
+   - The `pii_redacted` flag and `redacted_preview` are visible in the response.
+
+3. Switch to **Registry Explorer** in the sidebar.
+
+4. Apply a live bulletin: enter a `medication_id`, source `"FDA Orange Book"`,
+   and `updates: {"status": "restricted", "restriction_reason": "Safety review."}`.
+   Submit → `POST /registry/sync`.
+
+5. Click **Changelog**: `GET /registry/changelog` now shows `v1` with the
+   before/after field diff. The in-memory registry is immediately updated — no
+   server restart required.
+
+**Key point**: regulatory data changes don't require deployments. The changelog
+provides a full audit trail of every bulletin applied.
+
+---
+
+### 1:40–2:20 — Provider Support & Registry Explorer
 
 **What to show:**
 
@@ -312,9 +409,7 @@ human oversight is non-negotiable for high-stakes clinical outputs.
      are returned directly — only the five escalation rules gate responses.
    - The pipeline trace shows each stage's output without raw PII.
 
-5. Click **Registry Explorer** in the sidebar.
-
-6. Search for `metamizole`. Show that:
+5. Search for `metamizole` in Registry Explorer. Show that:
    - In `US_FDA`: `banned` — restriction reason: *agranulocytosis risk*.
    - In `EU_EMA`: `approved` — same INN, different regulatory outcome.
 
@@ -324,31 +419,37 @@ countries — this is the core cross-border compliance capability.
 
 ---
 
-### Minute 3 — Care Coordinator: HITL Approval & BI Dashboard
+### 2:20–3:00 — Care Coordinator: HITL Approval, BI Dashboard & Proactive Analytics
 
 **What to show:**
 
 1. Click **HITL Review** in the sidebar.
 
-2. The review queue shows the escalated Spanish/metamizole query from Minute 1,
-   with:
+2. The review queue shows the escalated Spanish/metamizole query from the first
+   minute, with:
    - `rules_triggered`: `["rule_2_banned_medication"]`
-   - `draft_response`: the Granite-generated response with alternatives
+   - `draft_response`: the Granite 4-generated response with alternatives
    - Status: `pending_review`
 
 3. Click **Approve** (or **Reject** with an optional reviewer note).
    The item moves out of the pending queue; its status updates to `approved`.
+   Because the queue is SQLite-backed, this approval survives a server restart.
 
 4. Click **BI Dashboard** in the sidebar. Walk through the charts:
    - Total queries processed, escalation rate.
    - Queries by language (Spanish, English, Hindi).
    - Top medication flags (metamizole leading).
    - Jurisdiction breakdown (US FDA vs EU EMA).
+   - **Proactive Recommendations** section — shows zero-PII care pattern
+     insights from the patient-log baseline:
+     - Dietary requirements by nationality (e.g. halal × 5 patients from SA).
+     - ICD-10 condition clusters (e.g. Endocrine & Metabolic × 4 patients).
+     - Cross-jurisdiction medication conflicts (e.g. domperidone × 3 patients).
 
-5. Confirm the **privacy guarantee** live: open the network tab in the browser
-   developer tools and inspect the `/analytics/dashboard` response — no raw
-   query text, no patient names, no session IDs. Only language codes, counts,
-   and INN drug names appear.
+5. Confirm the **privacy guarantee** live: inspect the `/analytics/dashboard`
+   response body — no raw query text, no patient names, no session IDs, no
+   patient IDs. Only language codes, counts, INN drug names, and anonymous
+   pattern aggregates appear.
 
 **Key point**: The BI pipeline and the agent pipeline are architecturally
 separate. Raw query text *cannot* enter analytics — it is a structural property
@@ -364,13 +465,14 @@ delabyrix/
 │   ├── main.py             # App entrypoint, router registration, lifespan
 │   ├── config.py           # pydantic-settings — all secrets from .env
 │   ├── pipeline/           # 5 agentic pipeline stages + HITL escalator
-│   ├── watsonx/            # Granite 3 client + Orchestrate adapter
-│   ├── registry/           # Cross-border medication registry
+│   ├── watsonx/            # Granite 4 client + Orchestrate adapter (8 skills)
+│   ├── registry/           # Cross-border medication registry + sync/changelog
 │   ├── jurisdiction/       # Deterministic jurisdiction resolver
-│   ├── hitl/               # HITL review queue + router
-│   ├── analytics/          # BI aggregator + router
+│   ├── hitl/               # SQLite-backed HITL review queue + router
+│   ├── analytics/          # BI aggregator (incl. proactive analytics) + router
 │   ├── synthetic/          # Synthetic data generators (zero PII)
 │   └── routers/            # FastAPI route definitions
+├── data/                   # Runtime SQLite DB (HITL_DB_PATH, gitignored)
 ├── frontend/               # Streamlit multi-page app
 │   ├── Home.py             # Landing page — user group selector
 │   └── pages/
@@ -380,13 +482,13 @@ delabyrix/
 │       ├── 4_BI_Dashboard.py
 │       └── 5_Registry_Explorer.py
 ├── orchestrate/
-│   └── openapi_spec.yaml   # OpenAPI 3.0 spec for watsonx Orchestrate skills
-├── tests/                  # 255 tests, all offline (mock mode)
+│   └── openapi_spec.yaml   # OpenAPI 3.0 spec — 8 watsonx Orchestrate skills
+├── tests/                  # All tests, fully offline (mock mode)
 ├── scripts/
 │   └── generate_synthetic_data.py
 ├── requirements.txt
 ├── .env.example            # Template — commit this; never commit .env
-├── .gitignore              # Excludes .env, synthetic_data/, secrets/
+├── .gitignore              # Excludes .env, synthetic_data/, secrets/, data/
 └── architecture.md         # Full architecture specification
 ```
 
@@ -397,12 +499,14 @@ delabyrix/
 | Zero hardcoded secrets | All credentials loaded via `pydantic-settings` from `.env`; no defaults for credentials |
 | `.env` excluded from VCS | `.gitignore` and `.bobignore` both exclude `.env`, `secrets/`, `*.key` |
 | `synthetic_data/` excluded | Gitignored — generated output never committed |
+| `data/` excluded | Gitignored — SQLite HITL DB never committed |
 | Zero real PII in codebase | All dev/test data is synthetically generated; verified by `tests/test_synthetic.py::test_no_real_pii_markers` |
-| PII stripped before LLM | Stage 0 (`pii_redactor.py`) runs before any text reaches watsonx.ai |
-| Analytics isolation | Raw query text structurally cannot enter the analytics aggregator |
+| PII stripped before LLM | Stage 0 (`pii_redactor.py`) runs before any text reaches watsonx.ai — including uploaded documents |
+| Analytics isolation | Raw query text structurally cannot enter the analytics aggregator; proactive recommendations contain only statistical aggregates |
 | HITL mandatory for high-risk outputs | Five escalation rules are enforced server-side, not in the UI |
+| HITL queue persisted safely | SQLite WAL mode; no raw patient text stored — only pipeline traces and draft responses |
 | Mock mode for offline use | `WATSONX_MOCK_MODE=true` skips all cloud calls; deterministic stubs |
 
 ---
 
-*Built with IBM Bob IDE · IBM watsonx.ai (ibm/granite-3-8b-instruct) · IBM watsonx Orchestrate*
+*Built with IBM Bob IDE · IBM watsonx.ai (`ibm/granite-4-h-small` · `/ml/v1/text/chat`) · IBM watsonx Orchestrate*
