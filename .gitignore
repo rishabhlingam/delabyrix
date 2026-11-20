@@ -1,4 +1,4 @@
-﻿# -- secrets & credentials
+# -- secrets & credentials
 .env
 secrets/
 *.key
@@ -44,3 +44,7 @@ Thumbs.db
 
 # -- HITL SQLite persistence (runtime data, never committed)
 data/
+
+# -- React frontend build artifacts
+frontend-react/node_modules/
+frontend-react/dist/

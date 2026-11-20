@@ -1,11 +1,13 @@
 /**
- * AppShell — Carbon-compliant top-nav layout with live HITL pending badge.
+ * AppShell — Carbon-compliant top-nav layout with live HITL pending badge and locale switcher.
  * Uses IBM Carbon design tokens throughout per ui-design-system.md.
  */
 import React, { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { Separator } from "@/components/ui/separator";
+import LocaleSwitcher from "@/components/layout/LocaleSwitcher";
 import { getHITLQueue } from "@/api/client";
+import { useLocale } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 function PendingBadge({ count }: { count: number }) {
@@ -17,16 +19,18 @@ function PendingBadge({ count }: { count: number }) {
   );
 }
 
-const NAV_ITEMS = [
-  { to: "/", label: "Patient Assistant" },
-  { to: "/hitl", label: "HITL Review", showBadge: true },
-  { to: "/registry", label: "Registry Explorer" },
-  { to: "/provider", label: "Provider Support" },
-  { to: "/analytics", label: "Analytics" },
-] as const;
-
 export default function AppShell() {
   const [pendingCount, setPendingCount] = useState(0);
+  const { t } = useLocale();
+
+  const NAV_ITEMS = [
+    { to: "/", labelKey: "nav.home" },
+    { to: "/patient", labelKey: "nav.patient_assistant" },
+    { to: "/hitl", labelKey: "nav.hitl_review", showBadge: true },
+    { to: "/registry", labelKey: "nav.registry" },
+    { to: "/provider", labelKey: "nav.provider_support" },
+    { to: "/analytics", labelKey: "nav.analytics" },
+  ] as const;
 
   useEffect(() => {
     let cancelled = false;
@@ -60,7 +64,7 @@ export default function AppShell() {
             </span>
             <Separator orientation="vertical" className="h-4" />
             {/* Nav tabs */}
-            <nav className="flex items-center gap-1 overflow-x-auto">
+            <nav className="flex flex-1 items-center gap-1 overflow-x-auto">
               {NAV_ITEMS.map((item) => (
                 <NavLink
                   key={item.to}
@@ -75,13 +79,15 @@ export default function AppShell() {
                     )
                   }
                 >
-                  {item.label}
+                  {t(item.labelKey)}
                   {"showBadge" in item && item.showBadge && (
                     <PendingBadge count={pendingCount} />
                   )}
                 </NavLink>
               ))}
             </nav>
+            {/* Locale switcher */}
+            <LocaleSwitcher />
           </div>
         </div>
       </header>

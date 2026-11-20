@@ -3,7 +3,7 @@
  * All types mirror the Pydantic models in architecture.md §6.
  */
 
-const BASE_URL = "http://localhost:8000";
+export const BASE_URL = "http://localhost:8000";
 
 // ─── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -274,6 +274,18 @@ export async function getAnalyticsDashboard(params?: {
   const { data } = await request<AnalyticsDashboardResponse>(
     `/analytics/dashboard${query}`
   );
+  return data;
+}
+
+// ─── §6.0 Health ──────────────────────────────────────────────────────────────
+
+export interface HealthResponse {
+  status: string;
+  version: string;
+}
+
+export async function getHealth(): Promise<HealthResponse> {
+  const { data } = await request<HealthResponse>("/health");
   return data;
 }
 

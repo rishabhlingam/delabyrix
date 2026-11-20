@@ -1,9 +1,11 @@
 /**
- * PatientAssistantPage — main patient-facing page at /
+ * PatientAssistantPage — main patient-facing page at /patient
  *
- * Two modes:
+ * Three modes:
  *   1. Clinical Question — POST /agent/query, polls GET /agent/session/{id} on 202
- *   2. Upload Document   — POST /documents/analyze (multipart)
+ *      + one-click Sample Clinical Prompts
+ *   2. Load Sample Document — GET /documents/{type}/{lang} (preloaded templates)
+ *   3. Upload Document     — POST /documents/analyze (multipart)
  *
  * Full IBM Carbon design system compliance per ui-design-system.md.
  */
@@ -26,12 +28,51 @@ import {
   postAgentQuery,
   postDocumentAnalyze,
   getSessionStatus,
+  getDocument,
   ApiError,
   type AgentQueryResponse,
   type AgentEscalatedResponse,
   type DocumentAnalysisResponse,
+  type DocumentResponse,
+  type DocType,
 } from "@/api/client";
 import { CheckmarkFilled, CloseFilled, Time, Translate, DocumentView } from "@carbon/icons-react";
+
+// ─── Sample prompts ────────────────────────────────────────────────────────────
+
+interface SamplePrompt {
+  label: string;
+  text: string;
+  language: string;
+  country: string;
+}
+
+const SAMPLE_PROMPTS: SamplePrompt[] = [
+  {
+    label: "ES: Metamizol + PII escalation demo",
+    text: "Soy María García, DNI 12345678A. Tomo metamizol en casa para el dolor. ¿Está permitido en los Estados Unidos? Mi médico en España me lo recetó.",
+    language: "es",
+    country: "US",
+  },
+  {
+    label: "EN: Cross-border metamizole query",
+    text: "I take metamizole at home for pain management. Is this medication allowed in the US? My doctor in Germany prescribed it.",
+    language: "en",
+    country: "US",
+  },
+  {
+    label: "HI: Cross-border drug + Hindi",
+    text: "मैं घर पर दर्द के लिए मेटामिज़ोल लेता हूं। क्या यह अमेरिका में अनुमत है? मेरे डॉक्टर ने भारत में इसे निर्धारित किया था।",
+    language: "hi",
+    country: "US",
+  },
+  {
+    label: "EN: ICU consent question",
+    text: "I need help understanding the ICU admission consent form. What am I agreeing to? Can you explain the risks mentioned?",
+    language: "en",
+    country: "DE",
+  },
+];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -52,7 +93,13 @@ function renderRedacted(text: string) {
   );
 }
 
-type Mode = "question" | "upload";
+type Mode = "question" | "sample_doc" | "upload";
+
+const DOC_TYPES: { label: string; value: DocType }[] = [
+  { label: "ICU Admission Consent", value: "consent_icu_admission" },
+  { label: "Surgery Consent", value: "consent_surgery" },
+  { label: "Billing & Deductible Explanation", value: "billing_deductible_explanation" },
+];
 
 // ─── Poll helper ──────────────────────────────────────────────────────────────
 
@@ -105,19 +152,53 @@ type UploadState =
   | { phase: "done"; result: DocumentAnalysisResponse }
   | { phase: "error"; message: string };
 
+type SampleDocState =
+  | { phase: "idle" }
+  | { phase: "loading" }
+  | { phase: "done"; result: DocumentResponse }
+  | { phase: "error"; message: string };
+
 export default function PatientAssistantPage() {
   const [mode, setMode] = useState<Mode>("question");
   const [language, setLanguage] = useState("en");
   const [country, setCountry] = useState("US");
+
+  // Reset stale state when switching modes
+  function switchMode(next: Mode) {
+    setMode(next);
+    if (next === "question") {
+      setUploadState({ phase: "idle" });
+      setSampleDocState({ phase: "idle" });
+    } else if (next === "sample_doc") {
+      stopPolling();
+      setQueryState({ phase: "idle" });
+      setUploadState({ phase: "idle" });
+    } else {
+      stopPolling();
+      setQueryState({ phase: "idle" });
+      setSampleDocState({ phase: "idle" });
+    }
+  }
 
   // ── Clinical Question state ──────────────────────────────────────────────
   const [queryText, setQueryText] = useState("");
   const [queryState, setQueryState] = useState<QueryState>({ phase: "idle" });
   const { startPolling, stopPolling } = usePollSession();
 
+  // ── Sample doc state ──────────────────────────────────────────────────────
+  const [selectedDocType, setSelectedDocType] = useState<DocType>("consent_icu_admission");
+  const [sampleDocState, setSampleDocState] = useState<SampleDocState>({ phase: "idle" });
+
   // ── Upload state ─────────────────────────────────────────────────────────
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadState, setUploadState] = useState<UploadState>({ phase: "idle" });
+
+  // ── Insert sample prompt ──────────────────────────────────────────────────
+  function insertSamplePrompt(prompt: SamplePrompt) {
+    setQueryText(prompt.text);
+    setLanguage(prompt.language);
+    setCountry(prompt.country);
+  }
 
   // ── Submit clinical question ──────────────────────────────────────────────
   const handleQuerySubmit = useCallback(
@@ -160,6 +241,18 @@ export default function PatientAssistantPage() {
     [queryText, language, country, startPolling, stopPolling]
   );
 
+  // ── Fetch sample hospital document ────────────────────────────────────────
+  const handleFetchSampleDoc = useCallback(async () => {
+    setSampleDocState({ phase: "loading" });
+    try {
+      const result = await getDocument(selectedDocType, language);
+      setSampleDocState({ phase: "done", result });
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : "Failed to fetch document.";
+      setSampleDocState({ phase: "error", message: msg });
+    }
+  }, [selectedDocType, language]);
+
   // ── Submit document upload ─────────────────────────────────────────────────
   const handleUploadSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -182,9 +275,9 @@ export default function PatientAssistantPage() {
     <div className="flex flex-col gap-4 py-6">
       {/* Page title */}
       <div>
-        <h1 className="text-base font-medium text-[#161616]">Patient & Document Assistant</h1>
+        <h1 className="text-base font-medium text-[#161616]">Patient &amp; Document Assistant</h1>
         <p className="mt-1 text-sm text-[#525252]">
-          Ask a clinical question or upload a consent form / hospital bill for analysis.
+          Ask a clinical question, load a sample hospital document, or upload a consent form / hospital bill for analysis.
         </p>
       </div>
 
@@ -210,13 +303,22 @@ export default function PatientAssistantPage() {
         <div className="flex items-center gap-1.5">
           <span className="text-xs text-[#525252]">Country</span>
           <Select value={country} onValueChange={setCountry}>
-            <SelectTrigger className="h-8 w-24 rounded-none text-xs">
+            <SelectTrigger className="h-8 w-28 rounded-none text-xs">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {["US", "DE", "FR", "ES", "IN", "GB"].map((c) => (
-                <SelectItem key={c} value={c}>
-                  {c}
+              {[
+                { code: "US", label: "United States" },
+                { code: "DE", label: "Germany" },
+                { code: "FR", label: "France" },
+                { code: "ES", label: "Spain" },
+                { code: "IN", label: "India" },
+                { code: "MX", label: "Mexico" },
+                { code: "GB", label: "United Kingdom" },
+                { code: "CA", label: "Canada" },
+              ].map(({ code, label }) => (
+                <SelectItem key={code} value={code}>
+                  {code} — {label}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -227,17 +329,23 @@ export default function PatientAssistantPage() {
 
         {/* Mode switcher */}
         <div className="flex gap-1">
-          {(["question", "upload"] as const).map((m) => (
+          {(
+            [
+              { key: "question", label: "Clinical Question" },
+              { key: "sample_doc", label: "Sample Document" },
+              { key: "upload", label: "Upload Document" },
+            ] as const
+          ).map(({ key, label }) => (
             <button
-              key={m}
-              onClick={() => setMode(m)}
+              key={key}
+              onClick={() => switchMode(key)}
               className={`rounded-none px-3 py-1.5 text-xs font-medium transition-colors ${
-                mode === m
+                mode === key
                   ? "bg-[#0f62fe] text-white"
                   : "border border-[#e0e0e0] bg-white text-[#525252] hover:bg-[#f4f4f4]"
               }`}
             >
-              {m === "question" ? "Clinical Question" : "Upload Document"}
+              {label}
             </button>
           ))}
         </div>
@@ -248,9 +356,28 @@ export default function PatientAssistantPage() {
       {/* ── Mode: Clinical Question ──────────────────────────────────────── */}
       {mode === "question" && (
         <div className="flex flex-col gap-4">
+          {/* Sample prompts */}
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-[#525252]">
+              Sample Clinical Prompts
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {SAMPLE_PROMPTS.map((p) => (
+                <button
+                  key={p.label}
+                  type="button"
+                  onClick={() => insertSamplePrompt(p)}
+                  className="rounded-none border border-[#e0e0e0] bg-white px-2.5 py-1 text-xs text-[#525252] hover:border-[#0f62fe] hover:text-[#0f62fe] transition-colors"
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <form onSubmit={handleQuerySubmit} className="flex flex-col gap-3">
             <Textarea
-              placeholder="Describe your symptoms, ask about a medication, or request help understanding a medical document..."
+              placeholder="e.g. 'I take metamizole at home. Is this allowed in the US?' / 'Tomo metamizol en casa. ¿Está permitido en los Estados Unidos?'"
               value={queryText}
               onChange={(e) => setQueryText(e.target.value)}
               rows={4}
@@ -281,8 +408,8 @@ export default function PatientAssistantPage() {
           )}
 
           {queryState.phase === "pending" && (
-            <Card className="border-l-4 border-l-[#f1c21b] rounded-none">
-              <CardHeader>
+            <Card className="gap-0 rounded-none border border-l-4 border-l-[#f1c21b] border-[#e0e0e0] bg-white py-0 shadow-none ring-0">
+              <CardHeader className="rounded-none bg-[#f4f4f4]/60 px-4 py-3">
                 <Badge
                   variant="outline"
                   className="h-auto rounded-none border-[#f1c21b] bg-[#fcf4d6] px-2 py-0.5 text-xs font-medium text-[#161616]"
@@ -291,7 +418,7 @@ export default function PatientAssistantPage() {
                   Pending Clinical Review
                 </Badge>
               </CardHeader>
-              <CardContent>
+              <CardContent className="p-4">
                 <p className="text-sm leading-relaxed text-[#161616]">
                   {queryState.message}
                 </p>
@@ -303,8 +430,8 @@ export default function PatientAssistantPage() {
           )}
 
           {queryState.phase === "approved" && (
-            <Card className="border-l-4 border-l-[#24a148] rounded-none">
-              <CardHeader>
+            <Card className="gap-0 rounded-none border border-l-4 border-l-[#24a148] border-[#e0e0e0] bg-white py-0 shadow-none ring-0">
+              <CardHeader className="rounded-none bg-[#f4f4f4]/60 px-4 py-3">
                 <Badge
                   variant="outline"
                   className="h-auto rounded-none border-[#24a148] bg-[#defbe6] px-2 py-0.5 text-xs font-medium text-[#0e6027]"
@@ -314,16 +441,16 @@ export default function PatientAssistantPage() {
                 </Badge>
               </CardHeader>
               <Separator className="bg-[#e0e0e0]" />
-              <CardContent>
+              <CardContent className="space-y-4 p-4">
                 <span className="text-xs font-semibold uppercase tracking-wider text-[#525252]">
                   Clinical Response
                 </span>
-                <div className="mt-2 border border-[#e0e0e0] bg-[#f4f4f4] p-3 text-sm leading-relaxed text-[#161616]">
-                  {queryState.result.response_text}
+                <div className="border border-[#e0e0e0] bg-[#f4f4f4] p-3 text-sm leading-relaxed text-[#161616]">
+                  {renderRedacted(queryState.result.response_text)}
                 </div>
               </CardContent>
               <Separator className="bg-[#e0e0e0]" />
-              <CardFooter>
+              <CardFooter className="flex flex-wrap items-center justify-between gap-3 rounded-none border-0 bg-[#f4f4f4]/40 px-4 py-2.5">
                 <span className="font-mono text-xs text-[#525252]">
                   Session: {queryState.result.session_id}
                 </span>
@@ -333,8 +460,8 @@ export default function PatientAssistantPage() {
           )}
 
           {queryState.phase === "escalated_approved" && (
-            <Card className="border-l-4 border-l-[#24a148] rounded-none">
-              <CardHeader>
+            <Card className="gap-0 rounded-none border border-l-4 border-l-[#24a148] border-[#e0e0e0] bg-white py-0 shadow-none ring-0">
+              <CardHeader className="rounded-none bg-[#f4f4f4]/60 px-4 py-3">
                 <Badge
                   variant="outline"
                   className="h-auto rounded-none border-[#24a148] bg-[#defbe6] px-2 py-0.5 text-xs font-medium text-[#0e6027]"
@@ -344,20 +471,20 @@ export default function PatientAssistantPage() {
                 </Badge>
               </CardHeader>
               <Separator className="bg-[#e0e0e0]" />
-              <CardContent>
+              <CardContent className="space-y-4 p-4">
                 <span className="text-xs font-semibold uppercase tracking-wider text-[#525252]">
                   Approved Clinical Response
                 </span>
-                <div className="mt-2 border border-[#e0e0e0] bg-[#f4f4f4] p-3 text-sm leading-relaxed text-[#161616]">
-                  {queryState.responseText}
+                <div className="border border-[#e0e0e0] bg-[#f4f4f4] p-3 text-sm leading-relaxed text-[#161616]">
+                  {renderRedacted(queryState.responseText)}
                 </div>
               </CardContent>
             </Card>
           )}
 
           {queryState.phase === "rejected" && (
-            <Card className="border-l-4 border-l-[#da1e28] rounded-none">
-              <CardHeader>
+            <Card className="gap-0 rounded-none border border-l-4 border-l-[#da1e28] border-[#e0e0e0] bg-white py-0 shadow-none ring-0">
+              <CardHeader className="rounded-none bg-[#f4f4f4]/60 px-4 py-3">
                 <Badge
                   variant="outline"
                   className="h-auto rounded-none border-[#da1e28] bg-[#fff1f1] px-2 py-0.5 text-xs font-medium text-[#a2191f]"
@@ -366,7 +493,7 @@ export default function PatientAssistantPage() {
                   Response Rejected
                 </Badge>
               </CardHeader>
-              <CardContent>
+              <CardContent className="p-4">
                 <p className="text-sm text-[#161616]">
                   Your query could not be answered at this time. Please consult your
                   healthcare provider directly for clinical guidance.
@@ -378,6 +505,70 @@ export default function PatientAssistantPage() {
           {queryState.phase === "error" && (
             <div className="border border-[#da1e28] bg-[#fff1f1] p-3 text-sm text-[#a2191f]">
               {queryState.message}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Mode: Sample Hospital Document ───────────────────────────────── */}
+      {mode === "sample_doc" && (
+        <div className="flex flex-col gap-4">
+          <p className="text-xs text-[#525252]">
+            Load a preloaded synthetic consent or billing document from the backend in your
+            selected language.
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-[#525252]">Document Type</span>
+              <Select
+                value={selectedDocType}
+                onValueChange={(v) => setSelectedDocType(v as DocType)}
+              >
+                <SelectTrigger className="h-8 w-56 rounded-none text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {DOC_TYPES.map(({ label, value }) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <Button
+              size="sm"
+              className="h-8 rounded-none bg-[#0f62fe] text-xs font-medium text-white hover:bg-[#0353e9]"
+              onClick={handleFetchSampleDoc}
+              disabled={sampleDocState.phase === "loading"}
+            >
+              <DocumentView className="mr-1.5 h-3.5 w-3.5" />
+              {sampleDocState.phase === "loading" ? "Loading…" : "Fetch Document"}
+            </Button>
+          </div>
+
+          {sampleDocState.phase === "done" && (
+            <Card className="gap-0 rounded-none border border-l-4 border-l-[#0f62fe] border-[#e0e0e0] bg-white py-0 shadow-none ring-0">
+              <CardHeader className="rounded-none bg-[#f4f4f4]/60 px-4 py-3">
+                <span className="text-xs font-semibold text-[#161616]">
+                  {sampleDocState.result.title}
+                </span>
+                <span className="font-mono text-xs text-[#525252]">
+                  {sampleDocState.result.doc_type} · {sampleDocState.result.language}
+                </span>
+              </CardHeader>
+              <Separator className="bg-[#e0e0e0]" />
+              <CardContent className="p-4">
+                <div className="border border-[#e0e0e0] bg-[#f4f4f4] p-3 text-sm leading-relaxed text-[#161616] whitespace-pre-wrap max-h-96 overflow-y-auto">
+                  {sampleDocState.result.content}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {sampleDocState.phase === "error" && (
+            <div className="border border-[#da1e28] bg-[#fff1f1] p-3 text-sm text-[#a2191f]">
+              {sampleDocState.message}
             </div>
           )}
         </div>
@@ -416,8 +607,8 @@ export default function PatientAssistantPage() {
 
           {/* Upload Results */}
           {uploadState.phase === "done" && (
-            <Card className="border-l-4 border-l-[#24a148] rounded-none">
-              <CardHeader>
+            <Card className="gap-0 rounded-none border border-l-4 border-l-[#24a148] border-[#e0e0e0] bg-white py-0 shadow-none ring-0">
+              <CardHeader className="rounded-none bg-[#f4f4f4]/60 px-4 py-3">
                 <Badge
                   variant="outline"
                   className="h-auto rounded-none border-[#24a148] bg-[#defbe6] px-2 py-0.5 text-xs font-medium text-[#0e6027]"
@@ -437,9 +628,9 @@ export default function PatientAssistantPage() {
                 </div>
               </CardHeader>
               <Separator className="bg-[#e0e0e0]" />
-              <CardContent>
+              <CardContent className="space-y-4 p-4">
                 {/* Redacted preview */}
-                <div className="mb-4">
+                <div>
                   <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-[#525252]">
                     Redacted Preview
                   </p>
@@ -459,7 +650,7 @@ export default function PatientAssistantPage() {
                 </div>
               </CardContent>
               <Separator className="bg-[#e0e0e0]" />
-              <CardFooter>
+              <CardFooter className="rounded-none border-0 bg-[#f4f4f4]/40 px-4 py-2.5">
                 <span className="font-mono text-xs text-[#525252]">
                   Jurisdiction: {uploadState.result.jurisdiction} &middot; Lang:{" "}
                   {uploadState.result.detected_language}

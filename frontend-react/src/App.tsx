@@ -1,6 +1,7 @@
 import React from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import AppShell from "@/components/layout/AppShell";
+import HomePage from "@/pages/HomePage";
 import PatientAssistantPage from "@/pages/PatientAssistantPage";
 import HITLReviewPage from "@/pages/HITLReviewPage";
 import RegistryExplorerPage from "@/pages/RegistryExplorerPage";
@@ -12,7 +13,8 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<AppShell />}>
-          <Route index element={<PatientAssistantPage />} />
+          <Route index element={<HomePage />} />
+          <Route path="patient" element={<PatientAssistantPage />} />
           <Route path="hitl" element={<HITLReviewPage />} />
           <Route path="registry" element={<RegistryExplorerPage />} />
           <Route path="provider" element={<ProviderSupportPage />} />

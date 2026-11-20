@@ -229,7 +229,31 @@ uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 - ReDoc: <http://localhost:8000/redoc>
 - Health check: <http://localhost:8000/health>
 
-### 5 · Start the Streamlit frontend
+### 5 · Start the React frontend (primary UI)
+
+Open a second terminal:
+
+```bash
+cd frontend-react
+npm install
+npm run dev
+```
+
+The React app opens at <http://localhost:5173> by default.
+
+**All five modules are fully implemented:**
+
+| Route | Module |
+|---|---|
+| `/` | Patient & Document Assistant |
+| `/hitl` | HITL Clinical Review Queue |
+| `/registry` | Cross-Border Registry Explorer + Regulatory Sync |
+| `/provider` | Provider Clinical Support |
+| `/analytics` | Zero-PII BI Dashboard |
+
+Switch UI language (EN / ES / HI) using the locale toggle in the top header bar.
+
+### 5b · Start the Streamlit frontend (legacy / reference)
 
 Open a second terminal (with the same `.venv` active):
 
@@ -473,7 +497,20 @@ delabyrix/
 │   ├── synthetic/          # Synthetic data generators (zero PII)
 │   └── routers/            # FastAPI route definitions
 ├── data/                   # Runtime SQLite DB (HITL_DB_PATH, gitignored)
-├── frontend/               # Streamlit multi-page app
+├── frontend-react/         # React 19 + Vite primary UI (http://localhost:5173)
+│   ├── src/
+│   │   ├── api/client.ts   # Typed API client for all backend endpoints
+│   │   ├── pages/          # PatientAssistantPage, HITLReviewPage, RegistryExplorerPage,
+│   │   │                   # ProviderSupportPage, AnalyticsDashboardPage
+│   │   ├── components/
+│   │   │   ├── layout/     # AppShell, LocaleSwitcher, PipelineTraceSheet
+│   │   │   ├── registry/   # RegistryStatusCard, RegulatorySyncDrawer
+│   │   │   └── ui/         # shadcn/ui primitives (IBM Carbon tokens)
+│   │   └── lib/
+│   │       ├── i18n.ts     # LocaleProvider + useLocale hook (EN/ES/HI)
+│   │       └── utils.ts    # cn() utility
+│   └── package.json
+├── frontend/               # Streamlit multi-page app (legacy / reference)
 │   ├── Home.py             # Landing page — user group selector
 │   └── pages/
 │       ├── 1_Patient_Assistant.py

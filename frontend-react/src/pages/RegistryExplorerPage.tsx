@@ -75,21 +75,26 @@ export default function RegistryExplorerPage() {
     if (!search.trim()) return;
     setSearchState({ phase: "loading" });
 
-    const [fdaResult, emaResult] = await Promise.allSettled([
-      getRegistryCheck({ medication_name: search.trim(), jurisdiction: "US_FDA" }),
-      getRegistryCheck({ medication_name: search.trim(), jurisdiction: "EU_EMA" }),
-    ]);
+    try {
+      const [fdaResult, emaResult] = await Promise.allSettled([
+        getRegistryCheck({ medication_name: search.trim(), jurisdiction: "US_FDA" }),
+        getRegistryCheck({ medication_name: search.trim(), jurisdiction: "EU_EMA" }),
+      ]);
 
-    const fda = fdaResult.status === "fulfilled" ? fdaResult.value : null;
-    const ema = emaResult.status === "fulfilled" ? emaResult.value : null;
+      const fda = fdaResult.status === "fulfilled" ? fdaResult.value : null;
+      const ema = emaResult.status === "fulfilled" ? emaResult.value : null;
 
-    if (fda === null && ema === null) {
-      setSearchState({
-        phase: "error",
-        message: `No records found for "${search.trim()}" in US_FDA or EU_EMA.`,
-      });
-    } else {
-      setSearchState({ phase: "done", fda, ema });
+      if (fda === null && ema === null) {
+        setSearchState({
+          phase: "error",
+          message: `No records found for "${search.trim()}" in US_FDA or EU_EMA.`,
+        });
+      } else {
+        setSearchState({ phase: "done", fda, ema });
+      }
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : "An unexpected error occurred.";
+      setSearchState({ phase: "error", message: msg });
     }
   }
 
@@ -107,8 +112,8 @@ export default function RegistryExplorerPage() {
             Check medication regulatory status across US FDA and EU EMA.
           </p>
         </div>
-        {/* Teammate 2 placeholder: Sync Drawer */}
-        <RegulatorySyncDrawer />
+        {/* Regulatory Sync Drawer — refreshes registry list on successful sync */}
+        <RegulatorySyncDrawer onSyncComplete={() => loadList(1, jurisdictionFilter)} />
       </div>
 
       <Separator className="bg-[#e0e0e0]" />
@@ -125,7 +130,7 @@ export default function RegistryExplorerPage() {
           type="submit"
           size="sm"
           className="h-9 rounded-none bg-[#0f62fe] text-xs font-medium text-white hover:bg-[#0353e9]"
-          disabled={searchState.phase === "loading"}
+          disabled={!search.trim() || searchState.phase === "loading"}
         >
           Search
         </Button>

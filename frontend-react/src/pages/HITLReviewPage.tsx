@@ -98,12 +98,15 @@ function ReviewCard({ item, onResolved }: ReviewCardProps) {
   }
 
   async function handleReject() {
-    setAction("rejecting");
+    if (!rejectionReason.trim()) {
+      setError("Please provide a rejection reason before confirming.");
+      return;
+    }
     setError(null);
     try {
       await postHITLReject({
         review_id: item.review_id,
-        rejection_reason: rejectionReason || "Rejected by reviewer",
+        rejection_reason: rejectionReason.trim(),
       });
       onResolved(item.review_id);
     } catch (err) {
@@ -219,16 +222,19 @@ function ReviewCard({ item, onResolved }: ReviewCardProps) {
           </div>
         )}
 
-        {/* Rejection reason (shown when reject is active) */}
+        {/* Rejection reason (shown when reject is active) — required */}
         {action === "rejecting" && (
           <div>
             <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-[#525252]">
-              Rejection Reason
+              Rejection Reason <span className="text-[#da1e28]">*</span>
             </p>
             <Textarea
               value={rejectionReason}
-              onChange={(e) => setRejectionReason(e.target.value)}
-              placeholder="Reason for rejecting this response…"
+              onChange={(e) => {
+                setRejectionReason(e.target.value);
+                if (e.target.value.trim()) setError(null);
+              }}
+              placeholder="Reason for rejecting this response (required)…"
               rows={2}
               className="rounded-none"
             />
