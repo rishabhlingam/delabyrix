@@ -2,17 +2,21 @@
  * AnalyticsDashboardPage tests.
  *
  * Covers:
- *  1. KPI tiles render with correct values
- *  2. All three proactive recommendation categories render
- *  3. Jurisdiction breakdown bar chart renders
- *  4. Language breakdown renders
- *  5. User persona breakdown renders
- *  6. Top flagged medications table renders
- *  7. Escalation rate gauge renders
- *  8. Date and jurisdiction filter controls render
- *  9. Refresh button re-fetches data
- *  10. Error state renders with retry button
- *  11. EN / ES / HI locale switching changes nav labels
+ *  1. KPI tiles render with correct values (5-tile grid)
+ *  2. Jurisdiction breakdown Recharts BarChart renders
+ *  3. Language breakdown Recharts BarChart renders (Top 8 + Other)
+ *  4. User persona donut PieChart renders with counts and percentages
+ *  5. Top flagged medications horizontal BarChart + regulatory table renders
+ *  6. HITL Escalation & Safety Outcomes BarChart renders
+ *  7. Escalation Rate Gauge renders (linear bar)
+ *  8. Proactive Care Recommendations section header renders
+ *  9. Proactive recs cards: Dietary / ICD-10 / Cross-border headings
+ *  10. Date and jurisdiction filter controls render
+ *  11. Refresh button re-fetches data
+ *  12. Error state renders with retry button
+ *  13. Active Jurisdictions KPI shows clean text (no literal $ delimiters)
+ *  14. `proactive_recommendations` field mapped correctly from API response
+ *  15. EN / ES / HI locale switching changes nav labels
  */
 import React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -24,6 +28,47 @@ import AppShell from "@/components/layout/AppShell";
 import { LocaleProvider } from "@/lib/i18n";
 import * as client from "@/api/client";
 import type { AnalyticsDashboardResponse } from "@/api/client";
+
+// ─── Recharts uses ResizeObserver + SVG layout — both unsupported in jsdom ────
+// Mock Recharts so chart wrappers render a simple div with a data-testid
+// and their data props are passed through, letting section headings render.
+
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(globalThis as any).ResizeObserver = ResizeObserverStub;
+
+vi.mock("recharts", () => {
+  // Renders children inside a plain div tagged with the chart type name
+  const makeMock = (name: string) =>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ({ children, data }: { children?: React.ReactNode; data?: any[] }) =>
+      React.createElement(
+        "div",
+        { "data-testid": `recharts-${name}`, "data-items": data?.length ?? 0 },
+        children
+      );
+
+  const noop = () => null;
+
+  return {
+    ResponsiveContainer: ({ children }: { children: React.ReactNode }) =>
+      React.createElement("div", { "data-testid": "recharts-responsive" }, children),
+    BarChart: makeMock("barchart"),
+    PieChart: makeMock("piechart"),
+    Bar: noop,
+    Pie: noop,
+    Cell: noop,
+    XAxis: noop,
+    YAxis: noop,
+    CartesianGrid: noop,
+    Tooltip: noop,
+    Legend: noop,
+  };
+});
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -39,6 +84,29 @@ function makeDashboardData(overrides: Partial<AnalyticsDashboardResponse> = {}):
     ],
     avg_pipeline_stages_completed: 4.2,
     jurisdiction_breakdown: { US_FDA: 90, EU_EMA: 52 },
+    proactive_recommendations: [
+      {
+        category: "dietary",
+        title: "High demand: halal dietary accommodation",
+        description: "12 patients require halal meals. Top requesting nationalities: SA, AE, PK.",
+        affected_groups: ["SA", "AE", "PK"],
+        magnitude: 12,
+      },
+      {
+        category: "icd10_cluster",
+        title: "Emerging cluster: Circulatory System (I00-I99)",
+        description: "8 patient encounters coded I00-I99.",
+        affected_groups: ["inpatient", "en"],
+        magnitude: 8,
+      },
+      {
+        category: "medication_conflict",
+        title: "Cross-border conflict hotspot: metamizole",
+        description: "5 patients currently on metamizole, which has divergent FDA/EMA status.",
+        affected_groups: ["DE", "RU"],
+        magnitude: 5,
+      },
+    ],
     ...overrides,
   };
 }
@@ -79,13 +147,129 @@ describe("AnalyticsDashboardPage", () => {
     await waitFor(() => {
       expect(screen.getByText("142")).toBeInTheDocument();
     });
-    // Escalation rate — appears multiple times (KPI tile + gauge section), use getAllBy
+    // Escalation rate — appears in KPI tile + gauge section
     expect(screen.getAllByText(/8\.0%/i).length).toBeGreaterThan(0);
     // Avg pipeline stages
     expect(screen.getAllByText(/4\.2/i).length).toBeGreaterThan(0);
+    // Medication flags total (15 + 8 = 23)
+    expect(screen.getByText("23")).toBeInTheDocument();
   });
 
-  it("renders all three proactive recommendation categories", async () => {
+  it("renders Active Jurisdictions KPI with clean text — no literal $ symbols", async () => {
+    vi.spyOn(client, "getAnalyticsDashboard").mockResolvedValue(makeDashboardData());
+    vi.spyOn(client, "getHITLQueue").mockResolvedValue({ pending_count: 0, items: [] });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText(/active jurisdictions/i)).toBeInTheDocument();
+    });
+    // Must NOT contain the old literal "$FDA+EMA+others$" string
+    expect(screen.queryByText(/\$FDA\+EMA\+others\$/i)).not.toBeInTheDocument();
+    // Should contain the clean "·" separated label
+    expect(screen.getByText(/US_FDA/)).toBeInTheDocument();
+  });
+
+  it("renders jurisdiction breakdown chart section", async () => {
+    vi.spyOn(client, "getAnalyticsDashboard").mockResolvedValue(makeDashboardData());
+    vi.spyOn(client, "getHITLQueue").mockResolvedValue({ pending_count: 0, items: [] });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText(/queries by jurisdiction/i)).toBeInTheDocument();
+    });
+    // The mocked Recharts ResponsiveContainer renders with data-testid
+    expect(screen.getAllByTestId("recharts-responsive").length).toBeGreaterThan(0);
+    // The KPI and jurisdiction sub-label should show US_FDA text
+    expect(screen.getByText(/US_FDA/)).toBeInTheDocument();
+  });
+
+  it("renders language breakdown chart section with Top 8 + Other label", async () => {
+    vi.spyOn(client, "getAnalyticsDashboard").mockResolvedValue(makeDashboardData());
+    vi.spyOn(client, "getHITLQueue").mockResolvedValue({ pending_count: 0, items: [] });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText(/queries by language/i)).toBeInTheDocument();
+    });
+    // Recharts container is rendered by the mock
+    expect(screen.getAllByTestId("recharts-barchart").length).toBeGreaterThan(0);
+  });
+
+  it("renders user persona breakdown donut chart section", async () => {
+    vi.spyOn(client, "getAnalyticsDashboard").mockResolvedValue(makeDashboardData());
+    vi.spyOn(client, "getHITLQueue").mockResolvedValue({ pending_count: 0, items: [] });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText(/user persona breakdown/i)).toBeInTheDocument();
+    });
+    // Legend entries
+    expect(screen.getAllByText(/patient/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/provider/i).length).toBeGreaterThan(0);
+  });
+
+  it("renders HITL escalation outcomes chart section", async () => {
+    vi.spyOn(client, "getAnalyticsDashboard").mockResolvedValue(makeDashboardData());
+    vi.spyOn(client, "getHITLQueue").mockResolvedValue({ pending_count: 0, items: [] });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText(/hitl escalation/i)).toBeInTheDocument();
+    });
+    // Recharts BarChart is mocked — verify the container renders
+    expect(screen.getAllByTestId("recharts-barchart").length).toBeGreaterThan(0);
+    // The escalation rate label appears below the chart
+    expect(screen.getAllByText(/escalation rate/i).length).toBeGreaterThan(0);
+  });
+
+  it("renders top flagged medications table and chart section", async () => {
+    vi.spyOn(client, "getAnalyticsDashboard").mockResolvedValue(makeDashboardData());
+    vi.spyOn(client, "getHITLQueue").mockResolvedValue({ pending_count: 0, items: [] });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      // metamizole appears in both the chart axis label and the table
+      expect(screen.getAllByText("metamizole").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("domperidone").length).toBeGreaterThan(0);
+    });
+    // Table is present
+    expect(screen.getByTestId("medication-flags-table")).toBeInTheDocument();
+    // Regulatory comparison table heading
+    expect(screen.getByText(/regulatory comparison table/i)).toBeInTheDocument();
+  });
+
+  it("renders escalation rate gauge section", async () => {
+    vi.spyOn(client, "getAnalyticsDashboard").mockResolvedValue(makeDashboardData());
+    vi.spyOn(client, "getHITLQueue").mockResolvedValue({ pending_count: 0, items: [] });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText(/escalation rate gauge/i)).toBeInTheDocument();
+    });
+    // 0% and 100% legend labels
+    expect(screen.getByText("0%")).toBeInTheDocument();
+    expect(screen.getByText("100%")).toBeInTheDocument();
+  });
+
+  it("renders proactive care recommendations section heading", async () => {
+    vi.spyOn(client, "getAnalyticsDashboard").mockResolvedValue(makeDashboardData());
+    vi.spyOn(client, "getHITLQueue").mockResolvedValue({ pending_count: 0, items: [] });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText(/emerging care needs/i)).toBeInTheDocument();
+    });
+  });
+
+  it("renders all three proactive recommendation category cards", async () => {
     vi.spyOn(client, "getAnalyticsDashboard").mockResolvedValue(makeDashboardData());
     vi.spyOn(client, "getHITLQueue").mockResolvedValue({ pending_count: 0, items: [] });
 
@@ -98,28 +282,31 @@ describe("AnalyticsDashboardPage", () => {
     });
   });
 
-  it("renders jurisdiction breakdown bars", async () => {
+  it("maps proactive_recommendations field from API response correctly", async () => {
     vi.spyOn(client, "getAnalyticsDashboard").mockResolvedValue(makeDashboardData());
     vi.spyOn(client, "getHITLQueue").mockResolvedValue({ pending_count: 0, items: [] });
 
     renderDashboard();
 
+    // When proactive_recommendations is populated the cards show the data charts
     await waitFor(() => {
-      expect(screen.getByText("US_FDA")).toBeInTheDocument();
-      expect(screen.getByText("EU_EMA")).toBeInTheDocument();
+      // Dietary rec magnitude should appear
+      expect(screen.getByText(/dietary accommodations/i)).toBeInTheDocument();
+      // Conflict rec should reference metamizole somewhere in the conflict card
+      expect(screen.getAllByText(/metamizole/i).length).toBeGreaterThan(0);
     });
   });
 
-  it("renders top flagged medications table", async () => {
-    vi.spyOn(client, "getAnalyticsDashboard").mockResolvedValue(makeDashboardData());
+  it("shows empty proactive section message when proactive_recommendations is empty", async () => {
+    vi.spyOn(client, "getAnalyticsDashboard").mockResolvedValue(
+      makeDashboardData({ proactive_recommendations: [] })
+    );
     vi.spyOn(client, "getHITLQueue").mockResolvedValue({ pending_count: 0, items: [] });
 
     renderDashboard();
 
     await waitFor(() => {
-      // metamizole appears in both the flags table and the ICD-10 proactive card
-      expect(screen.getAllByText("metamizole").length).toBeGreaterThan(0);
-      expect(screen.getAllByText("domperidone").length).toBeGreaterThan(0);
+      expect(screen.getByText(/no proactive recommendations computed yet/i)).toBeInTheDocument();
     });
   });
 
@@ -164,17 +351,6 @@ describe("AnalyticsDashboardPage", () => {
       expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
     });
   });
-
-  it("renders escalation rate gauge section", async () => {
-    vi.spyOn(client, "getAnalyticsDashboard").mockResolvedValue(makeDashboardData());
-    vi.spyOn(client, "getHITLQueue").mockResolvedValue({ pending_count: 0, items: [] });
-
-    renderDashboard();
-
-    await waitFor(() => {
-      expect(screen.getByText(/escalation rate gauge/i)).toBeInTheDocument();
-    });
-  });
 });
 
 describe("Locale switching (AppShell)", () => {
@@ -185,7 +361,6 @@ describe("Locale switching (AppShell)", () => {
 
   it("EN locale shows English nav labels", async () => {
     renderAppShell();
-    // Nav should have English labels by default
     await waitFor(() => {
       expect(screen.getByText(/patient assistant/i)).toBeInTheDocument();
     });
@@ -195,9 +370,7 @@ describe("Locale switching (AppShell)", () => {
     renderAppShell();
     const user = userEvent.setup();
 
-    // Find locale switcher buttons (EN / ES / HI)
     const esBtns = await screen.findAllByRole("button", { name: /es/i });
-    // Click the ES locale button (not a nav link)
     const esLocaleBtn = esBtns.find((btn) => btn.textContent === "ES");
     if (esLocaleBtn) {
       await user.click(esLocaleBtn);
@@ -205,7 +378,6 @@ describe("Locale switching (AppShell)", () => {
         expect(screen.getByText(/asistente de paciente/i)).toBeInTheDocument();
       });
     } else {
-      // LocaleSwitcher might render differently — test passes if it renders
       expect(screen.getByText(/patient assistant/i)).toBeInTheDocument();
     }
   });

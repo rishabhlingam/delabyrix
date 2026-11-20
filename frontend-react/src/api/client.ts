@@ -251,6 +251,14 @@ export async function postHITLReject(
 
 // ─── §6.5 Analytics ───────────────────────────────────────────────────────────
 
+export interface ProactiveRecommendation {
+  category: "dietary" | "icd10_cluster" | "medication_conflict";
+  title: string;
+  description: string;
+  affected_groups: string[];
+  magnitude: number;
+}
+
 export interface AnalyticsDashboardResponse {
   total_queries: number;
   escalation_rate: number;
@@ -259,6 +267,7 @@ export interface AnalyticsDashboardResponse {
   top_medication_flags: Array<{ medication: string; status: string; count: number }>;
   avg_pipeline_stages_completed: number;
   jurisdiction_breakdown: Record<string, number>;
+  proactive_recommendations: ProactiveRecommendation[];
 }
 
 export async function getAnalyticsDashboard(params?: {
