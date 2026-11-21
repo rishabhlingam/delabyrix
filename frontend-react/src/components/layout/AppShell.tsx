@@ -3,7 +3,7 @@
  * Uses IBM Carbon design tokens throughout per ui-design-system.md.
  */
 import React, { useEffect, useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { Separator } from "@/components/ui/separator";
 import LocaleSwitcher from "@/components/layout/LocaleSwitcher";
 import { getHITLQueue } from "@/api/client";
@@ -23,6 +23,8 @@ export default function AppShell() {
   const [pendingCount, setPendingCount] = useState(0);
   const { t } = useLocale();
 
+  const location = useLocation();
+
   const NAV_ITEMS = [
     { to: "/", labelKey: "nav.home" },
     { to: "/patient", labelKey: "nav.patient_assistant" },
@@ -31,6 +33,22 @@ export default function AppShell() {
     { to: "/provider", labelKey: "nav.provider_support" },
     { to: "/analytics", labelKey: "nav.analytics" },
   ] as const;
+
+  // Map route paths to English page names for the browser tab title.
+  const PAGE_TITLES: Record<string, string> = {
+    "/patient": "Patient Assistant",
+    "/hitl": "HITL Review",
+    "/registry": "Registry Explorer",
+    "/provider": "Provider Support",
+    "/analytics": "Analytics",
+  };
+
+  useEffect(() => {
+    const pageName = PAGE_TITLES[location.pathname];
+    document.title = pageName
+      ? `${pageName} · Delabyrix`
+      : "Delabyrix — Cross-Border Clinical AI Navigation";
+  }, [location.pathname]);
 
   useEffect(() => {
     let cancelled = false;
