@@ -75,7 +75,32 @@ export interface SessionStatusResponse {
   session_id: string;
   status: "approved" | "pending" | "rejected";
   response_text: string | null;
+  source_language?: string | null;
   rejection_reason?: string | null;
+  rejection_reason_english?: string | null;
+}
+
+export interface TranslateRequest {
+  text: string;
+  source_lang: string;
+  target_lang: string;
+}
+
+export interface TranslateResponse {
+  translated_text: string;
+  source_lang: string;
+  target_lang: string;
+  mock: boolean;
+}
+
+export async function postAgentTranslate(
+  body: TranslateRequest
+): Promise<TranslateResponse> {
+  const { data } = await request<TranslateResponse>("/agent/translate", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  return data;
 }
 
 export async function postAgentQuery(
@@ -206,6 +231,10 @@ export interface HITLItem {
   country: string;
   pipeline_trace: PipelineTrace;
   draft_response: string;
+  draft_response_english?: string | null;
+  source_language?: string;
+  redacted_original_text?: string | null;
+  english_inquiry?: string | null;
 }
 
 export interface HITLQueueResponse {
@@ -222,6 +251,7 @@ export interface ApproveRequest {
 export interface RejectRequest {
   review_id: string;
   rejection_reason: string;
+  rejection_reason_english?: string | null;
 }
 
 export async function getHITLQueue(): Promise<HITLQueueResponse> {

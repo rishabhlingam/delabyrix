@@ -522,7 +522,7 @@ class TestAgentRouter:
         assert status_data["response_text"] == "Here is the approved explanation."
 
     def test_session_status_rejected_after_review(self, test_client, queue):
-        """After HITL rejection, GET /agent/session/{id} must return 'rejected'."""
+        """After HITL rejection, GET /agent/session/{id} must return 'rejected' with reason."""
         resp = _query(
             test_client,
             text="Explain surgery consent for my child.",
@@ -540,6 +540,8 @@ class TestAgentRouter:
         status_resp = test_client.get(f"/agent/session/{session_id}")
         status_data = status_resp.json()
         assert status_data["status"] == "rejected"
+        assert status_data["rejection_reason"] == "Insufficient information."
+        assert "source_language" in status_data
 
     def test_session_status_no_escalation_returns_approved(self, test_client):
         """A session that was NOT escalated should report 'approved' on poll."""

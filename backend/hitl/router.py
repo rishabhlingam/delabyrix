@@ -102,12 +102,14 @@ def reject_review(body: RejectRequest) -> ReviewActionResponse:
 
     - **review_id**: UUID of the pending item.
     - **rejection_reason**: Explanation for why the draft was rejected.
+    - **rejection_reason_english**: Optional English translation of the rejection reason.
     """
     q = get_queue()
     try:
         q.reject(
             review_id=body.review_id,
             rejection_reason=body.rejection_reason,
+            rejection_reason_english=body.rejection_reason_english,
         )
     except KeyError:
         raise HTTPException(

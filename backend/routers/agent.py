@@ -104,7 +104,24 @@ class SessionStatusResponse(BaseModel):
     session_id: str
     status: str                    # approved | pending | rejected
     response_text: Optional[str]
+    source_language: Optional[str] = None
     rejection_reason: Optional[str] = None
+    rejection_reason_english: Optional[str] = None
+
+
+class TranslateRequest(BaseModel):
+    """Request body for POST /agent/translate."""
+    text: str = Field(..., description="Text to translate")
+    source_lang: str = Field(..., description="BCP-47 source language code")
+    target_lang: str = Field(..., description="BCP-47 target language code")
+
+
+class TranslateResponse(BaseModel):
+    """Response for POST /agent/translate."""
+    translated_text: str
+    source_lang: str
+    target_lang: str
+    mock: bool
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -243,6 +260,10 @@ def agent_query(body: AgentQueryRequest, response: Response):
         medication_flags=interpretation.medication_flags,
         pipeline_trace=pipeline_trace_dict,
         draft_response=final_response_text,
+        source_language=body.source_language,
+        draft_response_english=draft_english,
+        redacted_original_text=redacted_text,
+        english_inquiry=english_text,
     )
     escalation_result = evaluate_escalation(escalation_input)
     review_id = enqueue_if_escalated(escalation_result)
@@ -299,12 +320,49 @@ def get_session_status(session_id: str) -> SessionStatusResponse:
         response_text = item.approved_response
 
     rejection_reason: Optional[str] = None
+    rejection_reason_english: Optional[str] = None
     if item.status == "rejected":
         rejection_reason = item.rejection_reason
+        rejection_reason_english = item.rejection_reason_english
 
     return SessionStatusResponse(
         session_id=session_id,
         status=item.status,
+        source_language=item.source_language,
         response_text=response_text,
         rejection_reason=rejection_reason,
+        rejection_reason_english=rejection_reason_english,
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# POST /agent/translate
+# ──────────────────────────────────────────────────────────────────────────────
+
+@router.post(
+    "/translate",
+    response_model=TranslateResponse,
+    summary="Translate text between supported languages",
+)
+def translate_text(body: TranslateRequest) -> TranslateResponse:
+    """
+    Translate arbitrary text between supported language codes.
+
+    Accepts any direction: ``non-English -> English`` or
+    ``English -> non-English``.  When ``source_lang == target_lang`` the
+    original text is returned unchanged.  Uses the existing pipeline
+    translator with the application-wide WatsonxClient (mock-safe).
+    """
+    client = get_client()
+    result = translate(
+        text=body.text,
+        source_language=body.source_lang,
+        target_language=body.target_lang,
+        client=client,
+    )
+    return TranslateResponse(
+        translated_text=result.translated_text,
+        source_lang=body.source_lang,
+        target_lang=body.target_lang,
+        mock=result.mock,
     )

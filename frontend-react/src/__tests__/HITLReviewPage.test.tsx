@@ -9,6 +9,12 @@
  *  5. Resolved items are removed from the list immediately
  *  6. Badge count updates on resolution
  *  7. Empty queue shows "All caught up" state
+ *  8. Bilingual: non-English item shows "Translate to English" toggle on inquiry
+ *  9. Bilingual: non-English item shows "Translate to English" toggle on draft
+ * 10. Bilingual: rejection box pre-filled with native-language default
+ * 11. Bilingual: rejection box shows toggle for non-English items
+ * 12. English-only item does NOT show translate toggles
+ * 13. rejection_reason_english sent to /hitl/reject when translated
  */
 import React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -38,8 +44,20 @@ function makeItem(overrides: Partial<HITLItem> = {}): HITLItem {
       next_steps: "next steps",
     },
     draft_response: "Draft guidance for patient.",
+    source_language: "en",
     ...overrides,
   };
+}
+
+function makeSpanishItem(overrides: Partial<HITLItem> = {}): HITLItem {
+  return makeItem({
+    source_language: "es",
+    redacted_original_text: "Mi pregunta original en español.",
+    english_inquiry: "My original question in Spanish.",
+    draft_response: "Mi respuesta en español.",
+    draft_response_english: "My response in English.",
+    ...overrides,
+  });
 }
 
 function renderPage() {
@@ -71,7 +89,6 @@ describe("HITLReviewPage", () => {
     await waitFor(() => {
       expect(screen.getByText(/Pending Clinical Review/i)).toBeInTheDocument();
     });
-    // Check the card has border-l-4 stripe — look for the pending yellow stripe class in the DOM
     const cards = document.querySelectorAll(".border-l-\\[\\#f1c21b\\]");
     expect(cards.length).toBeGreaterThan(0);
   });
@@ -121,6 +138,10 @@ describe("HITLReviewPage", () => {
     // Reject reason textarea should appear
     expect(screen.getByPlaceholderText(/reason for rejecting/i)).toBeInTheDocument();
 
+    // Clear the textarea to simulate no reason
+    const reasonTextarea = screen.getByPlaceholderText(/reason for rejecting/i);
+    await user.clear(reasonTextarea);
+
     // Click "Confirm Reject" without filling in reason — should show validation error
     const confirmBtn = screen.getByRole("button", { name: /confirm reject/i });
     await user.click(confirmBtn);
@@ -146,18 +167,21 @@ describe("HITLReviewPage", () => {
     // Enter rejection mode
     await user.click(screen.getByRole("button", { name: /^Reject$/i }));
 
-    // Fill in rejection reason
+    // Clear auto-filled and type custom reason
     const reasonTextarea = screen.getByPlaceholderText(/reason for rejecting/i);
+    await user.clear(reasonTextarea);
     await user.type(reasonTextarea, "Clinical query outside scope");
 
     // Confirm reject
     await user.click(screen.getByRole("button", { name: /confirm reject/i }));
 
     await waitFor(() => {
-      expect(rejectMock).toHaveBeenCalledWith({
-        review_id: "rev-abc",
-        rejection_reason: "Clinical query outside scope",
-      });
+      expect(rejectMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          review_id: "rev-abc",
+          rejection_reason: "Clinical query outside scope",
+        })
+      );
     });
 
     // Item should be removed from list
@@ -220,6 +244,137 @@ describe("HITLReviewPage", () => {
 
     await waitFor(() => {
       expect(screen.getByText("[REDACTED_NAME]")).toBeInTheDocument();
+    });
+  });
+
+  // ─── Bilingual toggle tests ─────────────────────────────────────────────────
+
+  it("shows 'Translate to English' toggle on inquiry well for non-English item", async () => {
+    vi.spyOn(client, "getHITLQueue").mockResolvedValue({
+      pending_count: 1,
+      items: [makeSpanishItem()],
+    });
+
+    renderPage();
+
+    await waitFor(() => screen.getByText(/Pending Clinical Review/i));
+
+    // Should show translate toggle buttons (at least one for inquiry)
+    const translateBtns = screen.getAllByText(/Translate to English/i);
+    expect(translateBtns.length).toBeGreaterThan(0);
+  });
+
+  it("does NOT show translate toggle for English-only item", async () => {
+    vi.spyOn(client, "getHITLQueue").mockResolvedValue({
+      pending_count: 1,
+      items: [makeItem({ source_language: "en" })],
+    });
+
+    renderPage();
+
+    await waitFor(() => screen.getByText(/Pending Clinical Review/i));
+
+    // No translate toggles should be present
+    expect(screen.queryByText(/Translate to English/i)).not.toBeInTheDocument();
+  });
+
+  it("shows 'Show Original (ES)' after translate toggle is clicked", async () => {
+    const translateMock = vi.spyOn(client, "postAgentTranslate").mockResolvedValue({
+      translated_text: "Translated inquiry text",
+      source_lang: "es",
+      target_lang: "en",
+      mock: true,
+    });
+    vi.spyOn(client, "getHITLQueue").mockResolvedValue({
+      pending_count: 1,
+      items: [makeSpanishItem({ english_inquiry: null })],
+    });
+
+    renderPage();
+    const user = userEvent.setup();
+
+    await waitFor(() => screen.getByText(/Pending Clinical Review/i));
+
+    // Click the first "Translate to English" button (inquiry toggle)
+    const translateBtns = screen.getAllByText(/Translate to English/i);
+    await user.click(translateBtns[0]);
+
+    await waitFor(() => {
+      expect(translateMock).toHaveBeenCalled();
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/Show Original \(ES\)/i).length).toBeGreaterThan(0);
+    });
+  });
+
+  it("rejection box pre-filled with inquiry-specific content derived from the draft response", async () => {
+    vi.spyOn(client, "getHITLQueue").mockResolvedValue({
+      pending_count: 1,
+      items: [makeSpanishItem()],
+    });
+
+    renderPage();
+    const user = userEvent.setup();
+
+    await waitFor(() => screen.getByText(/Pending Clinical Review/i));
+
+    // Enter reject mode
+    await user.click(screen.getByRole("button", { name: /^Reject$/i }));
+
+    // The textarea should be pre-filled with content derived from the draft's first sentence
+    // ("Mi respuesta en español.") plus the Spanish action suffix — not a static generic message
+    const reasonTextarea = screen.getByPlaceholderText(/reason for rejecting/i);
+    const value = (reasonTextarea as HTMLTextAreaElement).value;
+    // Draft's first sentence is present
+    expect(value).toContain("Mi respuesta en español.");
+    // Followed by the Spanish action suffix
+    expect(value).toContain("Por favor contacte");
+  });
+
+  it("rejection_reason_english passed to postHITLReject after translate", async () => {
+    vi.spyOn(client, "postAgentTranslate").mockResolvedValue({
+      translated_text: "We are unable to process.",
+      source_lang: "es",
+      target_lang: "en",
+      mock: true,
+    });
+    vi.spyOn(client, "getHITLQueue").mockResolvedValue({
+      pending_count: 1,
+      items: [makeSpanishItem()],
+    });
+    const rejectMock = vi.spyOn(client, "postHITLReject").mockResolvedValue({ status: "ok" });
+
+    renderPage();
+    const user = userEvent.setup();
+
+    await waitFor(() => screen.getByText(/Pending Clinical Review/i));
+
+    // Enter reject mode
+    await user.click(screen.getByRole("button", { name: /^Reject$/i }));
+
+    // Find the translate toggle for the rejection box (last "Translate to English")
+    const translateBtns = screen.getAllByText(/Translate to English/i);
+    // Click the last one (rejection box toggle)
+    await user.click(translateBtns[translateBtns.length - 1]);
+
+    await waitFor(() =>
+      expect(screen.getAllByText(/Show Original \(ES\)/i).length).toBeGreaterThan(0)
+    );
+
+    // Now switch back to original and confirm reject
+    const showOrigBtns = screen.getAllByText(/Show Original \(ES\)/i);
+    await user.click(showOrigBtns[showOrigBtns.length - 1]);
+
+    // Confirm reject
+    await user.click(screen.getByRole("button", { name: /confirm reject/i }));
+
+    await waitFor(() => {
+      expect(rejectMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          rejection_reason_english: "We are unable to process.",
+        })
+      );
     });
   });
 });

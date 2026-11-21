@@ -9,10 +9,15 @@
  *  5. Sample Hospital Document Loader (GET /documents/{type}/{lang})
  *  6. Document upload with [REDACTED_*] rendering
  *  7. Mode switching clears state
+ *  8. Rejected state shows "Rejected" badge (not "Response Rejected")
+ *  9. Approved escalated state shows "Approved" badge (not "Reviewed & Approved")
+ * 10. Rejected state with rejection reason shows reason well
+ * 11. Rejected reason well shows bilingual toggle for non-English source
+ * 12. Rejected reason well shows EN→native toggle when reason is English & source is non-English
  */
 import React from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import PatientAssistantPage from "@/pages/PatientAssistantPage";
@@ -36,7 +41,6 @@ function renderPage() {
 describe("PatientAssistantPage", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    // Ensure real timers for most tests (some specific tests switch to fake)
     vi.useRealTimers();
   });
 
@@ -113,7 +117,6 @@ describe("PatientAssistantPage", () => {
       result: mockEscalated,
       isEscalated: true,
     });
-    // Keep pending — polling returns pending
     vi.spyOn(client, "getSessionStatus").mockResolvedValue({
       session_id: "sess-002",
       status: "pending",
@@ -144,7 +147,6 @@ describe("PatientAssistantPage", () => {
       result: mockEscalated,
       isEscalated: true,
     });
-    // Return approved immediately so polling resolves on first tick
     vi.spyOn(client, "getSessionStatus").mockResolvedValue({
       session_id: "sess-003",
       status: "approved",
@@ -156,17 +158,15 @@ describe("PatientAssistantPage", () => {
     await user.type(screen.getByRole("textbox"), "query to escalate");
     await user.click(screen.getByRole("button", { name: /submit query/i }));
 
-    // Wait for pending state first
     await waitFor(() => expect(screen.getByText(/pending clinical review/i)).toBeInTheDocument());
 
-    // Then polling resolves quickly since mock returns approved immediately
     await waitFor(
-      () => expect(screen.getByText(/Reviewed.*Approved/i)).toBeInTheDocument(),
+      () => expect(screen.getByText(/^Approved$/i)).toBeInTheDocument(),
       { timeout: 10000 }
     );
   }, 15000);
 
-  it("transitions from pending to rejected after polling", async () => {
+  it("transitions from pending to rejected after polling — shows 'Rejected' badge", async () => {
     const mockEscalated: client.AgentEscalatedResponse = {
       session_id: "sess-004",
       escalated: true,
@@ -178,12 +178,12 @@ describe("PatientAssistantPage", () => {
       result: mockEscalated,
       isEscalated: true,
     });
-    // Return rejected immediately
     vi.spyOn(client, "getSessionStatus").mockResolvedValue({
       session_id: "sess-004",
       status: "rejected",
       response_text: null,
       rejection_reason: "Out of scope",
+      source_language: "en",
     });
 
     renderPage();
@@ -194,7 +194,122 @@ describe("PatientAssistantPage", () => {
     await waitFor(() => expect(screen.getByText(/pending clinical review/i)).toBeInTheDocument());
 
     await waitFor(
-      () => expect(screen.getByText(/response rejected/i)).toBeInTheDocument(),
+      () => expect(screen.getByText(/^Rejected$/i)).toBeInTheDocument(),
+      { timeout: 10000 }
+    );
+    // Should NOT show old "Response Rejected" text
+    expect(screen.queryByText(/response rejected/i)).not.toBeInTheDocument();
+  }, 15000);
+
+  it("shows rejection reason in well when rejected with a reason", async () => {
+    const mockEscalated: client.AgentEscalatedResponse = {
+      session_id: "sess-005r",
+      escalated: true,
+      review_id: "rev-005r",
+      status: "pending_review",
+      message: "Under review.",
+    };
+    vi.spyOn(client, "postAgentQuery").mockResolvedValue({
+      result: mockEscalated,
+      isEscalated: true,
+    });
+    vi.spyOn(client, "getSessionStatus").mockResolvedValue({
+      session_id: "sess-005r",
+      status: "rejected",
+      response_text: null,
+      rejection_reason: "Clinical query outside approved scope.",
+      source_language: "en",
+    });
+
+    renderPage();
+    const user = userEvent.setup();
+    await user.type(screen.getByRole("textbox"), "out of scope");
+    await user.click(screen.getByRole("button", { name: /submit query/i }));
+
+    await waitFor(() => expect(screen.getByText(/pending clinical review/i)).toBeInTheDocument());
+
+    await waitFor(
+      () => expect(screen.getByText(/Clinical query outside approved scope/i)).toBeInTheDocument(),
+      { timeout: 10000 }
+    );
+  }, 15000);
+
+  it("rejected reason shows bilingual toggle when source_language is non-English and reason is non-English", async () => {
+    const mockEscalated: client.AgentEscalatedResponse = {
+      session_id: "sess-es-rej",
+      escalated: true,
+      review_id: "rev-es-rej",
+      status: "pending_review",
+      message: "Bajo revisión.",
+    };
+    vi.spyOn(client, "postAgentQuery").mockResolvedValue({
+      result: mockEscalated,
+      isEscalated: true,
+    });
+    vi.spyOn(client, "getSessionStatus").mockResolvedValue({
+      session_id: "sess-es-rej",
+      status: "rejected",
+      response_text: null,
+      rejection_reason: "La solicitud está fuera del alcance.",
+      rejection_reason_english: null,
+      source_language: "es",
+    });
+
+    renderPage();
+    const user = userEvent.setup();
+    await user.type(screen.getByRole("textbox"), "solicitud fuera de alcance");
+    await user.click(screen.getByRole("button", { name: /submit query/i }));
+
+    await waitFor(() => expect(screen.getByText(/pending clinical review/i)).toBeInTheDocument());
+
+    await waitFor(
+      () => expect(screen.getByText(/^Rejected$/i)).toBeInTheDocument(),
+      { timeout: 10000 }
+    );
+
+    // Should show translate button in rejection reason well (scenario A: non-EN reason for non-EN patient)
+    await waitFor(
+      () => expect(screen.getByText(/Translate to English/i)).toBeInTheDocument(),
+      { timeout: 10000 }
+    );
+  }, 15000);
+
+  it("rejected reason shows EN→native toggle when reason is English and source_language is non-English", async () => {
+    const mockEscalated: client.AgentEscalatedResponse = {
+      session_id: "sess-en-es-rej",
+      escalated: true,
+      review_id: "rev-en-es-rej",
+      status: "pending_review",
+      message: "Under review.",
+    };
+    vi.spyOn(client, "postAgentQuery").mockResolvedValue({
+      result: mockEscalated,
+      isEscalated: true,
+    });
+    vi.spyOn(client, "getSessionStatus").mockResolvedValue({
+      session_id: "sess-en-es-rej",
+      status: "rejected",
+      response_text: null,
+      rejection_reason: "Your query is outside the scope of this service. Please consult your doctor.",
+      rejection_reason_english: null,
+      source_language: "es",
+    });
+
+    renderPage();
+    const user = userEvent.setup();
+    await user.type(screen.getByRole("textbox"), "query en español");
+    await user.click(screen.getByRole("button", { name: /submit query/i }));
+
+    await waitFor(() => expect(screen.getByText(/pending clinical review/i)).toBeInTheDocument());
+
+    await waitFor(
+      () => expect(screen.getByText(/^Rejected$/i)).toBeInTheDocument(),
+      { timeout: 10000 }
+    );
+
+    // Should show "Translate to Spanish" button (scenario B: EN reason for ES patient)
+    await waitFor(
+      () => expect(screen.getByText(/Translate to Spanish/i)).toBeInTheDocument(),
       { timeout: 10000 }
     );
   }, 15000);
@@ -242,7 +357,6 @@ describe("PatientAssistantPage", () => {
     renderPage();
     const user = userEvent.setup();
 
-    // Switch to sample doc mode
     await user.click(screen.getByRole("button", { name: /sample document/i }));
     await user.click(screen.getByRole("button", { name: /fetch document/i }));
 
@@ -266,7 +380,6 @@ describe("PatientAssistantPage", () => {
     renderPage();
     const user = userEvent.setup();
 
-    // Switch to upload mode
     await user.click(screen.getByRole("button", { name: /upload document/i }));
     const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
     const file = new File(["consent text content"], "consent.txt", { type: "text/plain" });

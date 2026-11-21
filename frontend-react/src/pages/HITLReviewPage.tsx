@@ -3,12 +3,14 @@
  *
  * Displays all pending review items with:
  * - border-l-4 PENDING status stripe
- * - Redacted patient inquiry well
+ * - Redacted patient inquiry well (original language default, bilingual toggle)
  * - Risk escalation flags (WarningAltFilled)
- * - Optional response editor
+ * - Draft response editor (original language default, bilingual toggle)
+ * - Rejection reason box (original language default, bilingual toggle)
  * - Square Carbon Approve/Reject buttons
  *
  * Calls POST /hitl/approve and POST /hitl/reject per architecture.md §6.4.
+ * Calls POST /agent/translate for bidirectional translation toggles.
  */
 import React, { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -20,6 +22,7 @@ import {
   getHITLQueue,
   postHITLApprove,
   postHITLReject,
+  postAgentTranslate,
   ApiError,
   type HITLItem,
 } from "@/api/client";
@@ -29,12 +32,12 @@ import {
   WarningAltFilled,
   Security,
   Time,
+  Translate,
 } from "@carbon/icons-react";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function statusStripe(item: HITLItem) {
-  // All items in queue are pending
   void item;
   return "border-l-[#f1c21b]";
 }
@@ -60,6 +63,76 @@ function RedactedText({ text }: { text: string }) {
   );
 }
 
+/** Fallback rejection suffix per language when no draft content is available */
+const REJECTION_SUFFIX: Record<string, string> = {
+  en: "Please contact a licensed healthcare provider for further assistance.",
+  es: "Por favor contacte a un proveedor de salud autorizado para más asistencia.",
+  hi: "कृपया आगे की सहायता के लिए एक लाइसेंस प्राप्त स्वास्थ्य सेवा प्रदाता से संपर्क करें।",
+};
+
+const GENERIC_REJECTION: Record<string, string> = {
+  en: "We are unable to process your request at this time. Please consult your healthcare provider directly for clinical guidance.",
+  es: "No podemos procesar su solicitud en este momento. Por favor consulte directamente a su proveedor de salud para orientación clínica.",
+  hi: "हम इस समय आपका अनुरोध संसाधित करने में असमर्थ हैं। कृपया नैदानिक मार्गदर्शन के लिए सीधे अपने स्वास्थ्य सेवा प्रदाता से संपर्क करें।",
+};
+
+/**
+ * Build a concise, inquiry-specific rejection note from the draft response.
+ *
+ * Strategy: take the first sentence of the draft (which typically states the
+ * key clinical finding, e.g. "Metamizole is restricted in the US due to …"),
+ * strip any numbered-list preamble, then append a short action line in the
+ * appropriate language.  Falls back to a generic message when the draft is
+ * empty or too short to extract a meaningful sentence.
+ */
+function buildSpecificRejection(draftResponse: string, lang: string): string {
+  const suffix = REJECTION_SUFFIX[lang.toLowerCase()] ?? REJECTION_SUFFIX["en"];
+  const generic = GENERIC_REJECTION[lang.toLowerCase()] ?? GENERIC_REJECTION["en"];
+
+  if (!draftResponse || !draftResponse.trim()) return generic;
+
+  // Strip leading list markers like "1." or "•" and normalise whitespace
+  const cleaned = draftResponse
+    .replace(/^\s*[\d]+[.)]\s*/gm, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // Extract up to the first sentence-ending punctuation (. ! ?)
+  const match = cleaned.match(/^(.{20,}?[.!?])/);
+  if (!match) return generic;
+
+  const firstSentence = match[1].trim();
+  // Guard against extracting a sentence that is a numbered-list artefact
+  // (pure digits + punctuation with no real words)
+  if (firstSentence.length < 20) return generic;
+
+  return `${firstSentence} ${suffix}`;
+}
+
+// ─── Bilingual toggle button ───────────────────────────────────────────────────
+
+interface BilingualToggleProps {
+  showingOriginal: boolean;
+  sourceLang: string;
+  onToggle: () => void;
+  loading?: boolean;
+}
+
+function BilingualToggle({ showingOriginal, sourceLang, onToggle, loading }: BilingualToggleProps) {
+  const langLabel = sourceLang.toUpperCase();
+  return (
+    <button
+      type="button"
+      disabled={loading}
+      onClick={onToggle}
+      className="inline-flex items-center text-xs font-medium text-[#0f62fe] hover:underline disabled:opacity-50"
+    >
+      <Translate className="mr-1 h-3.5 w-3.5" />
+      {showingOriginal ? "Translate to English" : `Show Original (${langLabel})`}
+    </button>
+  );
+}
+
 // ─── Single review card ───────────────────────────────────────────────────────
 
 interface ReviewCardProps {
@@ -68,12 +141,114 @@ interface ReviewCardProps {
 }
 
 function ReviewCard({ item, onResolved }: ReviewCardProps) {
+  const sourceLang = item.source_language || "en";
+  const isNonEnglish = sourceLang.toLowerCase() !== "en";
+
+  // ── Patient inquiry toggle ────────────────────────────────────────────────
+  const [inquiryShowOriginal, setInquiryShowOriginal] = useState(true);
+  const [inquiryTranslating, setInquiryTranslating] = useState(false);
+  const [inquiryEnglish, setInquiryEnglish] = useState<string | null>(
+    item.english_inquiry ?? null
+  );
+  const originalInquiry =
+    item.redacted_original_text ?? item.pipeline_trace?.translation ?? "(no text)";
+
+  async function toggleInquiry() {
+    if (!inquiryShowOriginal) {
+      setInquiryShowOriginal(true);
+      return;
+    }
+    // Translate original → English if not cached
+    if (!inquiryEnglish) {
+      setInquiryTranslating(true);
+      try {
+        const r = await postAgentTranslate({
+          text: originalInquiry,
+          source_lang: sourceLang,
+          target_lang: "en",
+        });
+        setInquiryEnglish(r.translated_text);
+      } catch {
+        // fall back silently — keep showing original
+        setInquiryTranslating(false);
+        return;
+      }
+      setInquiryTranslating(false);
+    }
+    setInquiryShowOriginal(false);
+  }
+
+  // ── Draft response toggle ─────────────────────────────────────────────────
   const [editedResponse, setEditedResponse] = useState(item.draft_response);
-  const [reviewerNote, setReviewerNote] = useState("");
-  const [rejectionReason, setRejectionReason] = useState("");
+  const [draftShowOriginal, setDraftShowOriginal] = useState(true);
+  const [draftTranslating, setDraftTranslating] = useState(false);
+  const [draftEnglish, setDraftEnglish] = useState<string | null>(
+    item.draft_response_english ?? null
+  );
   const [showEditor, setShowEditor] = useState(false);
+  const [reviewerNote, setReviewerNote] = useState("");
+
+  async function toggleDraft() {
+    if (!draftShowOriginal) {
+      // switching back to original: sync the editedResponse to match what was last set
+      setDraftShowOriginal(true);
+      return;
+    }
+    // Translate current editedResponse → English
+    setDraftTranslating(true);
+    try {
+      const r = await postAgentTranslate({
+        text: editedResponse,
+        source_lang: sourceLang,
+        target_lang: "en",
+      });
+      setDraftEnglish(r.translated_text);
+    } catch {
+      setDraftTranslating(false);
+      return;
+    }
+    setDraftTranslating(false);
+    setDraftShowOriginal(false);
+  }
+
+  // ── Rejection reason toggle ───────────────────────────────────────────────
+  const [rejectionReason, setRejectionReason] = useState("");
+  const [rejectionShowOriginal, setRejectionShowOriginal] = useState(true);
+  const [rejectionTranslating, setRejectionTranslating] = useState(false);
+  const [rejectionEnglish, setRejectionEnglish] = useState<string | null>(null);
+
+  async function toggleRejection() {
+    if (!rejectionShowOriginal) {
+      setRejectionShowOriginal(true);
+      return;
+    }
+    setRejectionTranslating(true);
+    try {
+      const r = await postAgentTranslate({
+        text: rejectionReason || buildSpecificRejection(editedResponse, sourceLang),
+        source_lang: sourceLang,
+        target_lang: "en",
+      });
+      setRejectionEnglish(r.translated_text);
+    } catch {
+      setRejectionTranslating(false);
+      return;
+    }
+    setRejectionTranslating(false);
+    setRejectionShowOriginal(false);
+  }
+
+  // ── Action state ──────────────────────────────────────────────────────────
   const [action, setAction] = useState<"approving" | "rejecting" | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Seed rejection reason from the draft content (inquiry-specific) when entering reject mode
+  function enterRejectMode() {
+    setRejectionReason(buildSpecificRejection(editedResponse, sourceLang));
+    setRejectionShowOriginal(true);
+    setRejectionEnglish(null);
+    setAction("rejecting");
+  }
 
   // Detect possible risk flags from pipeline_trace
   const hasMedFlags = item.pipeline_trace?.medical_interpretation
@@ -107,6 +282,7 @@ function ReviewCard({ item, onResolved }: ReviewCardProps) {
       await postHITLReject({
         review_id: item.review_id,
         rejection_reason: rejectionReason.trim(),
+        rejection_reason_english: rejectionEnglish ?? undefined,
       });
       onResolved(item.review_id);
     } catch (err) {
@@ -137,6 +313,15 @@ function ReviewCard({ item, onResolved }: ReviewCardProps) {
             <Security className="mr-1 h-3.5 w-3.5" />
             {item.pipeline_trace?.jurisdiction ?? item.country}
           </Badge>
+          {/* Language badge */}
+          {sourceLang !== "en" && (
+            <Badge
+              variant="outline"
+              className="h-auto rounded-none border-[#a6c8ff] bg-[#edf5ff] px-2 py-0.5 font-mono text-xs font-normal text-[#0043ce]"
+            >
+              {sourceLang.toUpperCase()}
+            </Badge>
+          )}
         </div>
         <div className="flex items-center gap-3">
           <span className="font-mono text-xs text-[#525252] tabular-nums">
@@ -169,22 +354,52 @@ function ReviewCard({ item, onResolved }: ReviewCardProps) {
           </div>
         )}
 
-        {/* Patient inquiry (redacted) */}
+        {/* Patient inquiry (redacted) — original language default with bilingual toggle */}
         <div>
-          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-[#525252]">
-            Patient Inquiry (Redacted)
-          </p>
+          <div className="mb-1.5 flex items-center gap-2">
+            <p className="text-xs font-semibold uppercase tracking-wider text-[#525252]">
+              Patient Inquiry (Redacted)
+            </p>
+            {isNonEnglish && (
+              <BilingualToggle
+                showingOriginal={inquiryShowOriginal}
+                sourceLang={sourceLang}
+                onToggle={toggleInquiry}
+                loading={inquiryTranslating}
+              />
+            )}
+          </div>
           <div className="border border-[#e0e0e0] bg-[#f4f4f4] p-3 text-sm leading-relaxed text-[#161616]">
-            <RedactedText text={item.pipeline_trace?.translation ?? "(no text)"} />
+            {inquiryTranslating ? (
+              <span className="text-[#525252]">Translating…</span>
+            ) : (
+              <RedactedText
+                text={
+                  inquiryShowOriginal
+                    ? originalInquiry
+                    : (inquiryEnglish ?? originalInquiry)
+                }
+              />
+            )}
           </div>
         </div>
 
-        {/* Draft response editor */}
+        {/* Draft response editor — original language default with bilingual toggle */}
         <div>
           <div className="mb-1.5 flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-wider text-[#525252]">
-              Draft Response
-            </p>
+            <div className="flex items-center gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wider text-[#525252]">
+                Draft Response
+              </p>
+              {isNonEnglish && (
+                <BilingualToggle
+                  showingOriginal={draftShowOriginal}
+                  sourceLang={sourceLang}
+                  onToggle={toggleDraft}
+                  loading={draftTranslating}
+                />
+              )}
+            </div>
             <button
               className="text-xs font-medium text-[#0f62fe] hover:underline"
               onClick={() => setShowEditor((v) => !v)}
@@ -192,16 +407,24 @@ function ReviewCard({ item, onResolved }: ReviewCardProps) {
               {showEditor ? "Collapse editor" : "Edit response"}
             </button>
           </div>
-          {showEditor ? (
+          {draftTranslating ? (
+            <div className="border border-[#e0e0e0] bg-[#f4f4f4] p-3 text-sm text-[#525252]">
+              Translating…
+            </div>
+          ) : showEditor && draftShowOriginal ? (
             <Textarea
               value={editedResponse}
-              onChange={(e) => setEditedResponse(e.target.value)}
+              onChange={(e) => {
+                setEditedResponse(e.target.value);
+                // Invalidate cached English translation on edit
+                setDraftEnglish(null);
+              }}
               rows={5}
               className="rounded-none"
             />
           ) : (
             <div className="border border-[#e0e0e0] bg-[#f4f4f4] p-3 text-sm leading-relaxed text-[#161616]">
-              {editedResponse}
+              {draftShowOriginal ? editedResponse : (draftEnglish ?? editedResponse)}
             </div>
           )}
         </div>
@@ -222,22 +445,43 @@ function ReviewCard({ item, onResolved }: ReviewCardProps) {
           </div>
         )}
 
-        {/* Rejection reason (shown when reject is active) — required */}
+        {/* Rejection reason (shown when reject is active) */}
         {action === "rejecting" && (
           <div>
-            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-[#525252]">
-              Rejection Reason <span className="text-[#da1e28]">*</span>
-            </p>
-            <Textarea
-              value={rejectionReason}
-              onChange={(e) => {
-                setRejectionReason(e.target.value);
-                if (e.target.value.trim()) setError(null);
-              }}
-              placeholder="Reason for rejecting this response (required)…"
-              rows={2}
-              className="rounded-none"
-            />
+            <div className="mb-1.5 flex items-center gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wider text-[#525252]">
+                Rejection Reason <span className="text-[#da1e28]">*</span>
+              </p>
+              {isNonEnglish && (
+                <BilingualToggle
+                  showingOriginal={rejectionShowOriginal}
+                  sourceLang={sourceLang}
+                  onToggle={toggleRejection}
+                  loading={rejectionTranslating}
+                />
+              )}
+            </div>
+            {rejectionTranslating ? (
+              <div className="border border-[#e0e0e0] bg-[#f4f4f4] p-3 text-sm text-[#525252]">
+                Translating…
+              </div>
+            ) : rejectionShowOriginal ? (
+              <Textarea
+                value={rejectionReason}
+                onChange={(e) => {
+                  setRejectionReason(e.target.value);
+                  setRejectionEnglish(null);
+                  if (e.target.value.trim()) setError(null);
+                }}
+                placeholder="Reason for rejecting this response (required)…"
+                rows={2}
+                className="rounded-none"
+              />
+            ) : (
+              <div className="border border-[#e0e0e0] bg-[#f4f4f4] p-3 text-sm leading-relaxed text-[#161616]">
+                {rejectionEnglish ?? rejectionReason}
+              </div>
+            )}
           </div>
         )}
 
@@ -257,14 +501,14 @@ function ReviewCard({ item, onResolved }: ReviewCardProps) {
         </span>
         <div className="flex gap-2">
           <Button
-            variant="destructive"
+            variant="outline"
             size="sm"
             className="h-8 rounded-none border-[#da1e28] text-xs font-medium text-[#da1e28] hover:bg-[#da1e28] hover:text-white"
             disabled={action === "approving"}
             onClick={
               action === "rejecting"
                 ? handleReject
-                : () => setAction("rejecting")
+                : enterRejectMode
             }
           >
             <CloseFilled className="mr-1.5 h-3.5 w-3.5" />

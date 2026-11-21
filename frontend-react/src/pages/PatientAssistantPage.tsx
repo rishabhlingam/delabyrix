@@ -29,6 +29,7 @@ import {
   postDocumentAnalyze,
   getSessionStatus,
   getDocument,
+  postAgentTranslate,
   ApiError,
   type AgentQueryResponse,
   type AgentEscalatedResponse,
@@ -103,12 +104,163 @@ const DOC_TYPES: { label: string; value: DocType }[] = [
 
 // ─── Poll helper ──────────────────────────────────────────────────────────────
 
+
+// ─── RejectedCard ─────────────────────────────────────────────────────────────
+
+interface RejectedCardProps {
+  reason?: string | null;
+  reasonEnglish?: string | null;
+  sourceLang?: string | null;
+}
+
+function RejectedCard({ reason, reasonEnglish, sourceLang }: RejectedCardProps) {
+  const lang = (sourceLang || "en").toLowerCase();
+  const isNonEnglish = lang !== "en";
+  const hasReason = Boolean(reason && reason.trim());
+
+  // Bilingual toggle for rejection reason
+  const [showOriginal, setShowOriginal] = useState(true);
+  const [translating, setTranslating] = useState(false);
+  const [translated, setTranslated] = useState<string | null>(reasonEnglish ?? null);
+
+  async function toggleLang() {
+    if (!showOriginal) {
+      setShowOriginal(true);
+      return;
+    }
+    if (!translated) {
+      setTranslating(true);
+      try {
+        const r = await postAgentTranslate({
+          text: reason!,
+          source_lang: lang,
+          target_lang: "en",
+        });
+        setTranslated(r.translated_text);
+      } catch {
+        setTranslating(false);
+        return;
+      }
+      setTranslating(false);
+    }
+    setShowOriginal(false);
+  }
+
+  // Toggle for English reason → patient's language
+  const [showEnForPatient, setShowEnForPatient] = useState(true);
+  const [enTranslating, setEnTranslating] = useState(false);
+  const [enToLang, setEnToLang] = useState<string | null>(null);
+  const langNames: Record<string, string> = { es: "Spanish", hi: "Hindi" };
+
+  async function toggleEnForPatient() {
+    if (!showEnForPatient) {
+      setShowEnForPatient(true);
+      return;
+    }
+    if (!enToLang) {
+      setEnTranslating(true);
+      try {
+        const r = await postAgentTranslate({
+          text: reason!,
+          source_lang: "en",
+          target_lang: lang,
+        });
+        setEnToLang(r.translated_text);
+      } catch {
+        setEnTranslating(false);
+        return;
+      }
+      setEnTranslating(false);
+    }
+    setShowEnForPatient(false);
+  }
+
+  // Determine scenario:
+  // A) reason written in non-English language for non-English patient → toggle original↔EN
+  // B) reason written in English for non-English patient → toggle EN↔patient-lang
+  // C) English patient (no toggle needed)
+  const reasonLooksEnglish = reason
+    ? /\b(the|are|your|this|that|please|consult|you)\b/i.test(reason)
+    : true;
+  const scenarioB = isNonEnglish && hasReason && reasonLooksEnglish;
+  const scenarioA = isNonEnglish && hasReason && !reasonLooksEnglish;
+
+  return (
+    <Card className="gap-0 rounded-none border border-l-4 border-l-[#da1e28] border-[#e0e0e0] bg-white py-0 shadow-none ring-0">
+      <CardHeader className="rounded-none bg-[#f4f4f4]/60 px-4 py-3">
+        <Badge
+          variant="outline"
+          className="h-auto rounded-none border-[#da1e28] bg-[#fff1f1] px-2 py-0.5 text-xs font-medium text-[#a2191f]"
+        >
+          <CloseFilled className="mr-1.5 h-3.5 w-3.5 text-[#da1e28]" />
+          Rejected
+        </Badge>
+      </CardHeader>
+      {hasReason && (
+        <>
+          <Separator className="bg-[#e0e0e0]" />
+          <CardContent className="space-y-3 p-4">
+            {/* Rejection Reason label + toggle */}
+            <div className="flex items-center gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wider text-[#525252]">
+                Rejection Reason
+              </p>
+              {scenarioA && (
+                <button
+                  type="button"
+                  disabled={translating}
+                  onClick={toggleLang}
+                  className="inline-flex items-center text-xs font-medium text-[#0f62fe] hover:underline disabled:opacity-50"
+                >
+                  <Translate className="mr-1 h-3.5 w-3.5" />
+                  {showOriginal ? "Translate to English" : `Show Original (${lang.toUpperCase()})`}
+                </button>
+              )}
+              {scenarioB && (
+                <button
+                  type="button"
+                  disabled={enTranslating}
+                  onClick={toggleEnForPatient}
+                  className="inline-flex items-center text-xs font-medium text-[#0f62fe] hover:underline disabled:opacity-50"
+                >
+                  <Translate className="mr-1 h-3.5 w-3.5" />
+                  {showEnForPatient
+                    ? `Translate to ${langNames[lang] ?? lang.toUpperCase()}`
+                    : "Show Original (EN)"}
+                </button>
+              )}
+            </div>
+            <div className="border border-[#e0e0e0] bg-[#f4f4f4] p-3 text-sm leading-relaxed text-[#161616]">
+              {translating || enTranslating ? (
+                <span className="text-[#525252]">Translating…</span>
+              ) : scenarioA ? (
+                showOriginal ? reason : (translated ?? reason)
+              ) : scenarioB ? (
+                showEnForPatient ? reason : (enToLang ?? reason)
+              ) : (
+                reason
+              )}
+            </div>
+          </CardContent>
+        </>
+      )}
+    </Card>
+  );
+}
+
+
 function usePollSession() {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   function startPolling(
     sessionId: string,
-    onResolved: (status: string, text: string | null | undefined) => void
+    onResolved: (
+      status: string,
+      text: string | null | undefined,
+      rejectionReason?: string | null,
+      rejectionReasonEnglish?: string | null,
+      sourceLang?: string | null
+    ) => void
   ) {
     if (intervalRef.current) clearInterval(intervalRef.current);
     intervalRef.current = setInterval(async () => {
@@ -117,7 +269,7 @@ function usePollSession() {
         if (s.status !== "pending") {
           clearInterval(intervalRef.current!);
           intervalRef.current = null;
-          onResolved(s.status, s.response_text);
+          onResolved(s.status, s.response_text, s.rejection_reason, s.rejection_reason_english, s.source_language);
         }
       } catch {
         // keep polling
@@ -143,7 +295,7 @@ type QueryState =
   | { phase: "pending"; sessionId: string; message: string }
   | { phase: "approved"; result: AgentQueryResponse }
   | { phase: "escalated_approved"; responseText: string }
-  | { phase: "rejected"; reason?: string | null }
+  | { phase: "rejected"; reason?: string | null; reasonEnglish?: string | null; sourceLang?: string | null }
   | { phase: "error"; message: string };
 
 type UploadState =
@@ -223,11 +375,11 @@ export default function PatientAssistantPage() {
             sessionId: esc.session_id,
             message: esc.message,
           });
-          startPolling(esc.session_id, (status, text) => {
+          startPolling(esc.session_id, (status, text, rejectionReason, rejectionReasonEnglish, sourceLang) => {
             if (status === "approved") {
               setQueryState({ phase: "escalated_approved", responseText: text ?? "" });
             } else {
-              setQueryState({ phase: "rejected" });
+              setQueryState({ phase: "rejected", reason: rejectionReason, reasonEnglish: rejectionReasonEnglish, sourceLang });
             }
           });
         } else {
@@ -467,7 +619,7 @@ export default function PatientAssistantPage() {
                   className="h-auto rounded-none border-[#24a148] bg-[#defbe6] px-2 py-0.5 text-xs font-medium text-[#0e6027]"
                 >
                   <CheckmarkFilled className="mr-1.5 h-3.5 w-3.5 text-[#24a148]" />
-                  Reviewed &amp; Approved
+                  Approved
                 </Badge>
               </CardHeader>
               <Separator className="bg-[#e0e0e0]" />
@@ -483,23 +635,11 @@ export default function PatientAssistantPage() {
           )}
 
           {queryState.phase === "rejected" && (
-            <Card className="gap-0 rounded-none border border-l-4 border-l-[#da1e28] border-[#e0e0e0] bg-white py-0 shadow-none ring-0">
-              <CardHeader className="rounded-none bg-[#f4f4f4]/60 px-4 py-3">
-                <Badge
-                  variant="outline"
-                  className="h-auto rounded-none border-[#da1e28] bg-[#fff1f1] px-2 py-0.5 text-xs font-medium text-[#a2191f]"
-                >
-                  <CloseFilled className="mr-1.5 h-3.5 w-3.5 text-[#da1e28]" />
-                  Response Rejected
-                </Badge>
-              </CardHeader>
-              <CardContent className="p-4">
-                <p className="text-sm text-[#161616]">
-                  Your query could not be answered at this time. Please consult your
-                  healthcare provider directly for clinical guidance.
-                </p>
-              </CardContent>
-            </Card>
+            <RejectedCard
+              reason={queryState.reason}
+              reasonEnglish={queryState.reasonEnglish}
+              sourceLang={queryState.sourceLang}
+            />
           )}
 
           {queryState.phase === "error" && (

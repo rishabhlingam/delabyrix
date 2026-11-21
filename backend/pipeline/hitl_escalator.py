@@ -70,16 +70,20 @@ class EscalationInput:
 
     Attributes
     ──────────
-    session_id          : Session UUID from the original request.
-    original_text       : Redacted text (NOT raw — raw PII must not be passed).
-    user_type           : "patient" | "provider" | "coordinator".
-    country             : ISO 3166-1 alpha-2 country code.
-    is_ambiguous_jurisdiction : True when jurisdiction resolver was ambiguous.
-    redaction_result    : Output from Stage 0 (pii_redactor).
-    min_confidence      : Lowest confidence score across all pipeline LLM calls.
-    medication_flags    : List of MedicationFlag from Stage 2.
-    pipeline_trace      : Dict with stage outputs for HITL reviewer.
-    draft_response      : Assembled draft response text for reviewer.
+    session_id               : Session UUID from the original request.
+    original_text            : Redacted text (NOT raw — raw PII must not be passed).
+    user_type                : "patient" | "provider" | "coordinator".
+    country                  : ISO 3166-1 alpha-2 country code.
+    is_ambiguous_jurisdiction: True when jurisdiction resolver was ambiguous.
+    redaction_result         : Output from Stage 0 (pii_redactor).
+    min_confidence           : Lowest confidence score across all pipeline LLM calls.
+    medication_flags         : List of MedicationFlag from Stage 2.
+    pipeline_trace           : Dict with stage outputs for HITL reviewer.
+    draft_response           : Assembled draft response text in source language.
+    source_language          : BCP-47 source language code.
+    draft_response_english   : English version of draft_response.
+    redacted_original_text   : Redacted patient inquiry in original language.
+    english_inquiry          : English translation of the patient inquiry.
     """
 
     session_id: str
@@ -92,6 +96,10 @@ class EscalationInput:
     medication_flags: List[MedicationFlag]
     pipeline_trace: dict
     draft_response: str
+    source_language: str = "en"
+    draft_response_english: Optional[str] = None
+    redacted_original_text: Optional[str] = None
+    english_inquiry: Optional[str] = None
 
 
 @dataclass
@@ -199,5 +207,9 @@ def enqueue_if_escalated(result: EscalationResult) -> Optional[str]:
         pipeline_trace=inp.pipeline_trace,
         draft_response=inp.draft_response,
         escalation_rules=result.rules_triggered,
+        source_language=inp.source_language,
+        draft_response_english=inp.draft_response_english,
+        redacted_original_text=inp.redacted_original_text,
+        english_inquiry=inp.english_inquiry,
     )
     return review_id

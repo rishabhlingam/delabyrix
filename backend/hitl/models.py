@@ -41,7 +41,19 @@ class ReviewItem(BaseModel):
     pipeline_trace: Dict[str, Any] = Field(
         ..., description="Stage outputs for reviewer context (no raw PII)"
     )
-    draft_response: str = Field(..., description="Draft response text for reviewer")
+    draft_response: str = Field(..., description="Draft response text for reviewer (original language)")
+    draft_response_english: Optional[str] = Field(
+        default=None, description="English version of the draft response"
+    )
+    source_language: str = Field(
+        default="en", description="BCP-47 source language code of the original query"
+    )
+    redacted_original_text: Optional[str] = Field(
+        default=None, description="Redacted patient inquiry in original language"
+    )
+    english_inquiry: Optional[str] = Field(
+        default=None, description="English translation of the patient inquiry"
+    )
     escalation_rules: List[str] = Field(
         default_factory=list,
         description="HITL rules that triggered escalation",
@@ -53,6 +65,7 @@ class ReviewItem(BaseModel):
     approved_response: Optional[str] = Field(default=None)
     reviewer_note: Optional[str] = Field(default=None)
     rejection_reason: Optional[str] = Field(default=None)
+    rejection_reason_english: Optional[str] = Field(default=None)
 
     model_config = {"use_enum_values": True}
 
@@ -81,6 +94,7 @@ class RejectRequest(BaseModel):
 
     review_id: str
     rejection_reason: str
+    rejection_reason_english: Optional[str] = None
 
 
 class ReviewActionResponse(BaseModel):

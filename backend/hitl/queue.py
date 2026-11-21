@@ -47,27 +47,34 @@ from backend.hitl.models import ReviewItem, ReviewStatus
 
 _CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS hitl_queue (
-    review_id         TEXT PRIMARY KEY,
-    session_id        TEXT NOT NULL,
-    submitted_at      TEXT NOT NULL,
-    status            TEXT NOT NULL DEFAULT 'pending',
-    user_type         TEXT NOT NULL,
-    country           TEXT NOT NULL,
-    pipeline_trace    TEXT NOT NULL DEFAULT '{}',
-    draft_response    TEXT NOT NULL DEFAULT '',
-    escalation_rules  TEXT NOT NULL DEFAULT '[]',
-    reviewed_at       TEXT,
-    approved_response TEXT,
-    reviewer_note     TEXT,
-    rejection_reason  TEXT
+    review_id              TEXT PRIMARY KEY,
+    session_id             TEXT NOT NULL,
+    submitted_at           TEXT NOT NULL,
+    status                 TEXT NOT NULL DEFAULT 'pending',
+    user_type              TEXT NOT NULL,
+    country                TEXT NOT NULL,
+    pipeline_trace         TEXT NOT NULL DEFAULT '{}',
+    draft_response         TEXT NOT NULL DEFAULT '',
+    draft_response_english TEXT,
+    source_language        TEXT NOT NULL DEFAULT 'en',
+    redacted_original_text TEXT,
+    english_inquiry        TEXT,
+    escalation_rules       TEXT NOT NULL DEFAULT '[]',
+    reviewed_at            TEXT,
+    approved_response      TEXT,
+    reviewer_note          TEXT,
+    rejection_reason       TEXT,
+    rejection_reason_english TEXT
 )
 """
 
 _INSERT = """
 INSERT INTO hitl_queue (
     review_id, session_id, submitted_at, status,
-    user_type, country, pipeline_trace, draft_response, escalation_rules
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+    user_type, country, pipeline_trace, draft_response,
+    draft_response_english, source_language,
+    redacted_original_text, english_inquiry, escalation_rules
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 """
 
 _SELECT_BY_ID = "SELECT * FROM hitl_queue WHERE review_id = ?;"
@@ -93,11 +100,21 @@ _UPDATE_REJECT = """
 UPDATE hitl_queue
    SET status = 'rejected',
        rejection_reason = ?,
+       rejection_reason_english = ?,
        reviewed_at = ?
  WHERE review_id = ?;
 """
 
 _DELETE_ALL = "DELETE FROM hitl_queue;"
+
+# Migration statements: add new columns to pre-existing databases.
+_MIGRATE_STMTS: list[str] = [
+    "ALTER TABLE hitl_queue ADD COLUMN draft_response_english TEXT;",
+    "ALTER TABLE hitl_queue ADD COLUMN source_language TEXT NOT NULL DEFAULT 'en';",
+    "ALTER TABLE hitl_queue ADD COLUMN redacted_original_text TEXT;",
+    "ALTER TABLE hitl_queue ADD COLUMN english_inquiry TEXT;",
+    "ALTER TABLE hitl_queue ADD COLUMN rejection_reason_english TEXT;",
+]
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -116,6 +133,10 @@ def _row_to_item(row: sqlite3.Row) -> ReviewItem:
         country=d["country"],
         pipeline_trace=json.loads(d["pipeline_trace"]),
         draft_response=d["draft_response"],
+        draft_response_english=d.get("draft_response_english"),
+        source_language=d.get("source_language", "en") or "en",
+        redacted_original_text=d.get("redacted_original_text"),
+        english_inquiry=d.get("english_inquiry"),
         escalation_rules=json.loads(d["escalation_rules"]),
         reviewed_at=(
             datetime.fromisoformat(d["reviewed_at"]) if d["reviewed_at"] else None
@@ -123,6 +144,7 @@ def _row_to_item(row: sqlite3.Row) -> ReviewItem:
         approved_response=d.get("approved_response"),
         reviewer_note=d.get("reviewer_note"),
         rejection_reason=d.get("rejection_reason"),
+        rejection_reason_english=d.get("rejection_reason_english"),
     )
 
 
@@ -165,6 +187,15 @@ class HITLQueue:
         # normal transaction flow and works identically for file and in-memory DBs.
         conn = self._connect()
         conn.execute(_CREATE_TABLE)
+        # Migrate: add bilingual columns to existing databases.
+        # ALTER TABLE … ADD COLUMN is a no-op if the column already exists
+        # (SQLite ≥3.37 supports IF NOT EXISTS; for older versions we silently
+        # ignore OperationalError("duplicate column name")).
+        for _stmt in _MIGRATE_STMTS:
+            try:
+                conn.execute(_stmt)
+            except sqlite3.OperationalError:
+                pass  # column already exists
         conn.commit()
 
     # ── Internal connection helper ────────────────────────────────────────────
@@ -194,18 +225,26 @@ class HITLQueue:
         pipeline_trace: Dict[str, Any],
         draft_response: str,
         escalation_rules: Optional[List[str]] = None,
+        source_language: str = "en",
+        draft_response_english: Optional[str] = None,
+        redacted_original_text: Optional[str] = None,
+        english_inquiry: Optional[str] = None,
     ) -> str:
         """
         Add a new item to the queue and persist it to SQLite.
 
         Parameters
         ──────────
-        session_id       : Session UUID from the agent request.
-        user_type        : "patient" | "provider" | "coordinator".
-        country          : ISO 3166-1 alpha-2 country code.
-        pipeline_trace   : Stage outputs dict (no raw PII).
-        draft_response   : Draft response text for the reviewer.
-        escalation_rules : List of triggered rule labels.
+        session_id             : Session UUID from the agent request.
+        user_type              : "patient" | "provider" | "coordinator".
+        country                : ISO 3166-1 alpha-2 country code.
+        pipeline_trace         : Stage outputs dict (no raw PII).
+        draft_response         : Draft response text in original source language.
+        escalation_rules       : List of triggered rule labels.
+        source_language        : BCP-47 source language code ("en", "es", "hi").
+        draft_response_english : English version of draft_response (when source != en).
+        redacted_original_text : Redacted patient inquiry in original language.
+        english_inquiry        : English translation of the patient inquiry.
 
         Returns
         ───────
@@ -227,6 +266,10 @@ class HITLQueue:
                         country,
                         json.dumps(pipeline_trace),
                         draft_response,
+                        draft_response_english,
+                        source_language,
+                        redacted_original_text,
+                        english_inquiry,
                         json.dumps(escalation_rules or []),
                     ),
                 )
@@ -264,7 +307,12 @@ class HITLQueue:
                 updated_row = conn.execute(_SELECT_BY_ID, (review_id,)).fetchone()
         return _row_to_item(updated_row)
 
-    def reject(self, review_id: str, rejection_reason: str) -> ReviewItem:
+    def reject(
+        self,
+        review_id: str,
+        rejection_reason: str,
+        rejection_reason_english: Optional[str] = None,
+    ) -> ReviewItem:
         """
         Mark a pending item as rejected.
 
@@ -286,7 +334,7 @@ class HITLQueue:
                     )
                 conn.execute(
                     _UPDATE_REJECT,
-                    (rejection_reason, reviewed_at, review_id),
+                    (rejection_reason, rejection_reason_english, reviewed_at, review_id),
                 )
                 updated_row = conn.execute(_SELECT_BY_ID, (review_id,)).fetchone()
         return _row_to_item(updated_row)
