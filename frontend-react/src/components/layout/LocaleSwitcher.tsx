@@ -17,13 +17,14 @@ export default function LocaleSwitcher() {
 
   return (
     <div className="flex items-center gap-1.5">
-      <Translate className="h-3.5 w-3.5 text-[#525252]" />
-      <div className="flex gap-0.5">
+      <Translate aria-hidden="true" className="h-3.5 w-3.5 text-[#525252]" />
+      <div className="flex gap-0.5" role="group" aria-label="Select language">
         {(["en", "es", "hi"] as Locale[]).map((l) => (
           <button
             key={l}
             onClick={() => setLocale(l)}
-            className={`rounded-none px-2 py-1 text-xs font-medium transition-colors ${
+            aria-pressed={locale === l}
+            className={`rounded-none px-2 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f62fe] ${
               locale === l
                 ? "bg-[#0f62fe] text-white"
                 : "border border-[#e0e0e0] bg-white text-[#525252] hover:bg-[#f4f4f4]"

@@ -13,7 +13,10 @@ import { cn } from "@/lib/utils";
 function PendingBadge({ count }: { count: number }) {
   if (count === 0) return null;
   return (
-    <span className="ml-1.5 inline-flex items-center justify-center rounded-none bg-[#da1e28] px-1.5 py-0.5 font-mono text-[10px] font-medium text-white tabular-nums">
+    <span
+      aria-label={`${count} pending items`}
+      className="ml-1.5 inline-flex items-center justify-center rounded-none bg-[#da1e28] px-1.5 py-0.5 font-mono text-[10px] font-medium text-white tabular-nums"
+    >
       {count}
     </span>
   );
@@ -76,6 +79,14 @@ export default function AppShell() {
 
   return (
     <div className="flex min-h-svh flex-col bg-background text-foreground">
+      {/* Skip to main content — visually hidden, appears on keyboard focus only */}
+      <a
+        href="#main-content"
+        className="sr-only focus-visible:not-sr-only focus-visible:absolute focus-visible:left-4 focus-visible:top-4 focus-visible:z-50 focus-visible:bg-white focus-visible:px-4 focus-visible:py-2 focus-visible:text-xs focus-visible:font-medium focus-visible:text-[#0f62fe] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f62fe]"
+      >
+        Skip to main content
+      </a>
+
       {/* Top Carbon Header */}
       <header className="border-b border-[#e0e0e0] bg-white">
         <div className="mx-auto max-w-6xl px-4">
@@ -86,7 +97,7 @@ export default function AppShell() {
             </span>
             <Separator orientation="vertical" className="h-4" />
             {/* Nav tabs */}
-            <nav className="flex flex-1 items-center gap-1 overflow-x-auto">
+            <nav aria-label="Main navigation" className="flex flex-1 items-center gap-1 overflow-x-auto">
               {NAV_ITEMS.map((item) => (
                 <NavLink
                   key={item.to}
@@ -94,7 +105,7 @@ export default function AppShell() {
                   end={item.to === "/"}
                   className={({ isActive }) =>
                     cn(
-                      "inline-flex items-center whitespace-nowrap rounded-none px-3 py-1.5 text-xs font-medium transition-colors",
+                      "inline-flex items-center whitespace-nowrap rounded-none px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f62fe]",
                       isActive
                         ? "bg-[#edf5ff] text-[#0043ce]"
                         : "text-[#525252] hover:bg-[#f4f4f4] hover:text-[#161616]"
@@ -115,7 +126,7 @@ export default function AppShell() {
       </header>
 
       {/* Page Content */}
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4">
+      <main id="main-content" className="mx-auto w-full max-w-6xl flex-1 px-4">
         <Outlet />
       </main>
 

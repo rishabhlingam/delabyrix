@@ -31,9 +31,9 @@ type SearchState =
   | { phase: "error"; message: string };
 
 function StatusIcon({ status }: { status: RegistryRecord["status"] }) {
-  if (status === "approved") return <CheckmarkFilled className="h-3.5 w-3.5 text-[#24a148]" />;
-  if (status === "banned" || status === "delisted") return <CloseFilled className="h-3.5 w-3.5 text-[#da1e28]" />;
-  return <WarningAltFilled className="h-3.5 w-3.5 text-[#b28600]" />;
+  if (status === "approved") return <CheckmarkFilled aria-hidden="true" className="h-3.5 w-3.5 text-[#24a148]" />;
+  if (status === "banned" || status === "delisted") return <CloseFilled aria-hidden="true" className="h-3.5 w-3.5 text-[#da1e28]" />;
+  return <WarningAltFilled aria-hidden="true" className="h-3.5 w-3.5 text-[#b28600]" />;
 }
 
 export default function RegistryExplorerPage() {
@@ -121,6 +121,7 @@ export default function RegistryExplorerPage() {
       {/* Search */}
       <form onSubmit={handleSearch} className="flex gap-2">
         <Input
+          aria-label="Search medication by INN or brand name"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search medication by INN or brand name…"
@@ -174,15 +175,17 @@ export default function RegistryExplorerPage() {
             Full Registry ({listTotal} records)
           </p>
           {/* Jurisdiction filter */}
-          <div className="flex gap-1">
+          <div className="flex gap-1" role="group" aria-label="Filter by jurisdiction">
             {["", "US_FDA", "EU_EMA"].map((jur) => (
               <button
                 key={jur}
+                type="button"
+                aria-pressed={jurisdictionFilter === jur}
                 onClick={() => {
                   setJurisdictionFilter(jur);
                   setListPage(1);
                 }}
-                className={`rounded-none px-2 py-1 text-xs font-medium transition-colors ${
+                className={`rounded-none px-2 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f62fe] ${
                   jurisdictionFilter === jur
                     ? "bg-[#0f62fe] text-white"
                     : "border border-[#e0e0e0] bg-white text-[#525252] hover:bg-[#f4f4f4]"
@@ -198,7 +201,7 @@ export default function RegistryExplorerPage() {
 
         {!listLoading && (
           <div className="border border-[#e0e0e0] bg-white">
-            <table className="w-full text-sm">
+            <table aria-label="Medication registry" className="w-full text-sm">
               <thead>
                 <tr className="border-b border-[#e0e0e0] bg-[#f4f4f4]">
                   <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-[#525252]">
@@ -229,7 +232,7 @@ export default function RegistryExplorerPage() {
                         variant="outline"
                         className="rounded-none border-[#a6c8ff] bg-[#edf5ff] font-mono text-xs font-normal text-[#0043ce]"
                       >
-                        <Security className="mr-1 h-3 w-3" />
+                        <Security aria-hidden="true" className="mr-1 h-3 w-3" />
                         {rec.jurisdiction}
                       </Badge>
                     </td>

@@ -283,7 +283,7 @@ export default function ProviderSupportPage() {
       </div>
 
       {/* Tab switcher */}
-      <div className="flex gap-1">
+      <div className="flex gap-1" role="group" aria-label="Select section">
         {(
           [
             { key: "explain" as const, label: "Procedure Explanation" },
@@ -293,8 +293,10 @@ export default function ProviderSupportPage() {
         ).map(({ key, label }) => (
           <button
             key={key}
+            type="button"
+            aria-pressed={activeTab === key}
             onClick={() => setActiveTab(key)}
-            className={`rounded-none px-3 py-1.5 text-xs font-medium transition-colors ${
+            className={`rounded-none px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f62fe] ${
               activeTab === key
                 ? "bg-[#0f62fe] text-white"
                 : "border border-[#e0e0e0] bg-white text-[#525252] hover:bg-[#f4f4f4]"
@@ -332,7 +334,7 @@ export default function ProviderSupportPage() {
                     setLanguage(s.language);
                     setCountry(s.country);
                   }}
-                  className="rounded-none border border-[#e0e0e0] bg-white px-2.5 py-1 text-xs text-[#525252] hover:border-[#0f62fe] hover:text-[#0f62fe] transition-colors"
+                  className="rounded-none border border-[#e0e0e0] bg-white px-2.5 py-1 text-xs text-[#525252] hover:border-[#0f62fe] hover:text-[#0f62fe] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f62fe]"
                 >
                   {s.label}
                 </button>
@@ -345,10 +347,10 @@ export default function ProviderSupportPage() {
             <div className="flex flex-wrap items-center gap-3">
               {/* Provider country */}
               <div className="flex items-center gap-1.5">
-                <Security className="h-3.5 w-3.5 text-[#525252]" />
+                <Security aria-hidden="true" className="h-3.5 w-3.5 text-[#525252]" />
                 <span className="text-xs text-[#525252]">Patient Country</span>
                 <Select value={country} onValueChange={setCountry}>
-                  <SelectTrigger className="h-8 w-28 rounded-none text-xs">
+                  <SelectTrigger aria-label="Patient Country" className="h-8 w-28 rounded-none text-xs">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -372,10 +374,10 @@ export default function ProviderSupportPage() {
 
               {/* Patient language */}
               <div className="flex items-center gap-1.5">
-                <Translate className="h-3.5 w-3.5 text-[#525252]" />
+                <Translate aria-hidden="true" className="h-3.5 w-3.5 text-[#525252]" />
                 <span className="text-xs text-[#525252]">Patient Language</span>
                 <Select value={language} onValueChange={setLanguage}>
-                  <SelectTrigger className="h-8 w-24 rounded-none text-xs">
+                  <SelectTrigger aria-label="Patient Language" className="h-8 w-24 rounded-none text-xs">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -393,6 +395,7 @@ export default function ProviderSupportPage() {
                 Clinical Query
               </span>
               <Textarea
+                aria-label="Clinical query"
                 placeholder="Describe the procedure or clinical situation in English…"
                 value={queryText}
                 onChange={(e) => setQueryText(e.target.value)}
@@ -450,7 +453,7 @@ export default function ProviderSupportPage() {
                   variant="outline"
                   className="h-auto rounded-none border-[#24a148] bg-[#defbe6] px-2 py-0.5 text-xs font-medium text-[#0e6027]"
                 >
-                  <CheckmarkFilled className="mr-1.5 h-3.5 w-3.5 text-[#24a148]" />
+                  <CheckmarkFilled aria-hidden="true" className="mr-1.5 h-3.5 w-3.5 text-[#24a148]" />
                   Clinical Guidance Ready
                 </Badge>
                 {queryState.result.pipeline_trace?.jurisdiction && (
@@ -458,7 +461,7 @@ export default function ProviderSupportPage() {
                     variant="outline"
                     className="h-auto rounded-none border-[#a6c8ff] bg-[#edf5ff] px-2 py-0.5 font-mono text-xs font-normal text-[#0043ce]"
                   >
-                    <Security className="mr-1 h-3.5 w-3.5" />
+                    <Security aria-hidden="true" className="mr-1 h-3.5 w-3.5" />
                     {queryState.result.pipeline_trace.jurisdiction}
                   </Badge>
                 )}
@@ -477,7 +480,7 @@ export default function ProviderSupportPage() {
                           key={flag}
                           className="inline-flex items-center bg-[#fff1f1] px-2 py-0.5 text-xs font-medium text-[#da1e28]"
                         >
-                          <WarningAltFilled className="mr-1 h-3.5 w-3.5" />
+                          <WarningAltFilled aria-hidden="true" className="mr-1 h-3.5 w-3.5" />
                           {flag}
                         </span>
                       ))}
@@ -504,7 +507,8 @@ export default function ProviderSupportPage() {
                 <div>
                   <button
                     type="button"
-                    className="text-xs font-medium text-[#0f62fe] hover:underline"
+                    aria-expanded={showTrace}
+                    className="text-xs font-medium text-[#0f62fe] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f62fe]"
                     onClick={() => setShowTrace((v) => !v)}
                   >
                     {showTrace ? "Hide" : "Show"} 5-Stage Pipeline Trace

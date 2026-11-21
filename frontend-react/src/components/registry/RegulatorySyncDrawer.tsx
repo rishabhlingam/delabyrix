@@ -125,8 +125,9 @@ export default function RegulatorySyncDrawer({ onSyncComplete }: Props) {
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <button
+        type="button"
         onClick={() => setOpen(true)}
-        className="inline-flex h-8 items-center gap-1.5 rounded-none bg-[#0f62fe] px-3 text-xs font-medium text-white hover:bg-[#0353e9] transition-colors"
+        className="inline-flex h-8 items-center gap-1.5 rounded-none bg-[#0f62fe] px-3 text-xs font-medium text-white hover:bg-[#0353e9] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f62fe]"
       >
         Sync Latest FDA/EMA Bulletins
       </button>
@@ -145,10 +146,11 @@ export default function RegulatorySyncDrawer({ onSyncComplete }: Props) {
             <form onSubmit={handleSync} className="space-y-3">
               {/* Medication ID */}
               <div className="space-y-1">
-                <label className="text-xs font-medium text-[#525252]">
+                <label htmlFor="sync-medication-id" className="text-xs font-medium text-[#525252]">
                   Medication ID (UUID)
                 </label>
                 <Input
+                  id="sync-medication-id"
                   value={medicationId}
                   onChange={(e) => setMedicationId(e.target.value)}
                   placeholder="e.g. med-001"
@@ -161,7 +163,7 @@ export default function RegulatorySyncDrawer({ onSyncComplete }: Props) {
               <div className="space-y-1">
                 <label className="text-xs font-medium text-[#525252]">Source</label>
                 <Select value={source} onValueChange={setSource}>
-                  <SelectTrigger className="h-8 w-full rounded-none text-xs">
+                  <SelectTrigger aria-label="Source" className="h-8 w-full rounded-none text-xs">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -175,7 +177,7 @@ export default function RegulatorySyncDrawer({ onSyncComplete }: Props) {
               <div className="space-y-1">
                 <label className="text-xs font-medium text-[#525252]">New Status</label>
                 <Select value={status} onValueChange={setStatus}>
-                  <SelectTrigger className="h-8 w-full rounded-none text-xs">
+                  <SelectTrigger aria-label="New Status" className="h-8 w-full rounded-none text-xs">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -189,10 +191,11 @@ export default function RegulatorySyncDrawer({ onSyncComplete }: Props) {
 
               {/* Restriction reason (optional) */}
               <div className="space-y-1">
-                <label className="text-xs font-medium text-[#525252]">
+                <label htmlFor="sync-restriction-reason" className="text-xs font-medium text-[#525252]">
                   Restriction Reason (optional)
                 </label>
                 <Textarea
+                  id="sync-restriction-reason"
                   value={restrictionReason}
                   onChange={(e) => setRestrictionReason(e.target.value)}
                   placeholder="Reason for restriction, ban, or delisting…"
@@ -238,7 +241,7 @@ export default function RegulatorySyncDrawer({ onSyncComplete }: Props) {
                     variant="outline"
                     className="h-auto rounded-none border-[#a6c8ff] bg-[#edf5ff] font-mono text-xs font-normal text-[#0043ce]"
                   >
-                    <Security className="mr-1 h-3 w-3" />
+                    <Security aria-hidden="true" className="mr-1 h-3 w-3" />
                     {syncState.result.source}
                   </Badge>
                 </div>
@@ -275,7 +278,7 @@ export default function RegulatorySyncDrawer({ onSyncComplete }: Props) {
               </p>
               <button
                 type="button"
-                className="text-xs font-medium text-[#0f62fe] hover:underline"
+                className="text-xs font-medium text-[#0f62fe] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f62fe]"
                 onClick={loadChangelog}
                 disabled={changelogLoading}
               >
@@ -341,7 +344,7 @@ export default function RegulatorySyncDrawer({ onSyncComplete }: Props) {
                                 variant="outline"
                                 className="h-auto rounded-none border-[#a6c8ff] bg-[#edf5ff] font-mono text-[10px] font-normal text-[#0043ce]"
                               >
-                                <Security className="mr-0.5 h-3 w-3" />
+                                <Security aria-hidden="true" className="mr-0.5 h-3 w-3" />
                                 {entry.source}
                               </Badge>
                             </td>

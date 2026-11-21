@@ -42,7 +42,7 @@ function HealthBanner() {
   if (state.phase === "loading") {
     return (
       <div className="flex items-center gap-2 border border-[#e0e0e0] bg-white px-4 py-2.5 text-xs text-[#525252]">
-        <Time className="h-3.5 w-3.5 text-[#b28600]" />
+        <Time aria-hidden="true" className="h-3.5 w-3.5 text-[#b28600]" />
         Checking backend health…
       </div>
     );
@@ -51,7 +51,7 @@ function HealthBanner() {
   if (state.phase === "error") {
     return (
       <div className="flex items-center gap-2 border border-[#da1e28] bg-[#fff1f1] px-4 py-2.5 text-xs text-[#a2191f]">
-        <CloseFilled className="h-3.5 w-3.5 text-[#da1e28]" />
+        <CloseFilled aria-hidden="true" className="h-3.5 w-3.5 text-[#da1e28]" />
         Backend offline — start{" "}
         <code className="font-mono">uvicorn backend.main:app --reload</code> to
         enable live mode.
@@ -62,12 +62,12 @@ function HealthBanner() {
   return (
     <div className="flex flex-wrap items-center gap-3 border border-[#e0e0e0] bg-white px-4 py-2.5 text-xs">
       <span className="flex items-center gap-1.5 text-[#24a148]">
-        <CheckmarkFilled className="h-3.5 w-3.5" />
+        <CheckmarkFilled aria-hidden="true" className="h-3.5 w-3.5" />
         Backend v{state.data.version} — {state.data.status}
       </span>
       <Separator orientation="vertical" className="h-4" />
       <span className="flex items-center gap-1.5 text-[#525252]">
-        <Security className="h-3.5 w-3.5 text-[#0f62fe]" />
+        <Security aria-hidden="true" className="h-3.5 w-3.5 text-[#0f62fe]" />
         Model: ibm/granite-4-h-small
       </span>
       <Separator orientation="vertical" className="h-4" />
@@ -75,7 +75,7 @@ function HealthBanner() {
         variant="outline"
         className="h-auto rounded-none border-[#f1c21b] bg-[#fcf4d6] px-2 py-0.5 font-mono text-[10px] font-normal text-[#161616]"
       >
-        <WarningAltFilled className="mr-1 h-3 w-3 text-[#b28600]" />
+        <WarningAltFilled aria-hidden="true" className="mr-1 h-3 w-3 text-[#b28600]" />
         watsonx mock mode
       </Badge>
     </div>
@@ -101,7 +101,7 @@ const LAUNCH_CARDS: LaunchCard[] = [
     description:
       "Get consent forms and billing documents explained in your language, check if your medications are allowed, and understand your care options.",
     stripe: "border-l-[#0f62fe]",
-    icon: <CheckmarkFilled className="h-3.5 w-3.5 text-[#24a148]" />,
+    icon: <CheckmarkFilled aria-hidden="true" className="h-3.5 w-3.5 text-[#24a148]" />,
   },
   {
     to: "/provider",
@@ -110,7 +110,7 @@ const LAUNCH_CARDS: LaunchCard[] = [
     description:
       "Generate culturally adapted procedure explanations, review local policy checklists, and check for cross-border drug alerts for international patients.",
     stripe: "border-l-[#24a148]",
-    icon: <Security className="h-3.5 w-3.5 text-[#0f62fe]" />,
+    icon: <Security aria-hidden="true" className="h-3.5 w-3.5 text-[#0f62fe]" />,
   },
   {
     to: "/hitl",
@@ -119,7 +119,7 @@ const LAUNCH_CARDS: LaunchCard[] = [
     description:
       "Review AI-generated responses that require human oversight, approve or edit draft responses, and monitor escalation activity.",
     stripe: "border-l-[#f1c21b]",
-    icon: <Time className="h-3.5 w-3.5 text-[#b28600]" />,
+    icon: <Time aria-hidden="true" className="h-3.5 w-3.5 text-[#b28600]" />,
   },
   {
     to: "/analytics",
@@ -128,7 +128,7 @@ const LAUNCH_CARDS: LaunchCard[] = [
     description:
       "Zero-PII aggregate interaction metrics: language breakdown, user persona, medication flags, jurisdiction distribution, and proactive care recommendations.",
     stripe: "border-l-[#8a3ffc]",
-    icon: <CheckmarkFilled className="h-3.5 w-3.5 text-[#8a3ffc]" />,
+    icon: <CheckmarkFilled aria-hidden="true" className="h-3.5 w-3.5 text-[#8a3ffc]" />,
   },
   {
     to: "/registry",
@@ -137,7 +137,7 @@ const LAUNCH_CARDS: LaunchCard[] = [
     description:
       "Browse and search the cross-border medication registry. Compare US FDA vs EU EMA regulatory status, sync latest bulletins, and view version changelog.",
     stripe: "border-l-[#da1e28]",
-    icon: <WarningAltFilled className="h-3.5 w-3.5 text-[#b28600]" />,
+    icon: <WarningAltFilled aria-hidden="true" className="h-3.5 w-3.5 text-[#b28600]" />,
   },
 ];
 
@@ -173,7 +173,7 @@ export default function HomePage() {
         </p>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {LAUNCH_CARDS.map((card) => (
-            <Link key={card.to + card.title} to={card.to} className="group">
+            <Link key={card.to + card.title} to={card.to} aria-label={card.title} className="group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f62fe]">
               <Card
                 className={`h-full gap-0 rounded-none border border-l-4 border-[#e0e0e0] bg-white py-0 shadow-none ring-0 transition-colors hover:border-[#8d8d8d] ${card.stripe}`}
               >
@@ -255,7 +255,7 @@ export default function HomePage() {
                   variant="outline"
                   className="rounded-none border-[#a6c8ff] bg-[#edf5ff] font-mono text-xs font-normal text-[#0043ce]"
                 >
-                  <Security className="mr-1 h-3 w-3" />
+                  <Security aria-hidden="true" className="mr-1 h-3 w-3" />
                   {j}
                 </Badge>
               ))}

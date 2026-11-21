@@ -125,9 +125,9 @@ function BilingualToggle({ showingOriginal, sourceLang, onToggle, loading }: Bil
       type="button"
       disabled={loading}
       onClick={onToggle}
-      className="inline-flex items-center text-xs font-medium text-[#0f62fe] hover:underline disabled:opacity-50"
+      className="inline-flex items-center text-xs font-medium text-[#0f62fe] hover:underline disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f62fe]"
     >
-      <Translate className="mr-1 h-3.5 w-3.5" />
+      <Translate aria-hidden="true" className="mr-1 h-3.5 w-3.5" />
       {showingOriginal ? "Translate to English" : `Show Original (${langLabel})`}
     </button>
   );
@@ -302,7 +302,7 @@ function ReviewCard({ item, onResolved }: ReviewCardProps) {
             variant="outline"
             className="h-auto rounded-none border-[#f1c21b] bg-[#fcf4d6] px-2 py-0.5 text-xs font-medium text-[#161616]"
           >
-            <Time className="mr-1.5 h-3.5 w-3.5 text-[#b28600]" />
+            <Time aria-hidden="true" className="mr-1.5 h-3.5 w-3.5 text-[#b28600]" />
             Pending Clinical Review
           </Badge>
           {/* Jurisdiction badge */}
@@ -310,7 +310,7 @@ function ReviewCard({ item, onResolved }: ReviewCardProps) {
             variant="outline"
             className="h-auto rounded-none border-[#a6c8ff] bg-[#edf5ff] px-2 py-0.5 font-mono text-xs font-normal text-[#0043ce]"
           >
-            <Security className="mr-1 h-3.5 w-3.5" />
+            <Security aria-hidden="true" className="mr-1 h-3.5 w-3.5" />
             {item.pipeline_trace?.jurisdiction ?? item.country}
           </Badge>
           {/* Language badge */}
@@ -341,13 +341,13 @@ function ReviewCard({ item, onResolved }: ReviewCardProps) {
           <div className="flex flex-wrap gap-2">
             {hasMedFlags && (
               <span className="inline-flex items-center bg-[#fff1f1] px-2 py-0.5 text-xs font-medium text-[#da1e28]">
-                <WarningAltFilled className="mr-1 h-3.5 w-3.5" />
+                <WarningAltFilled aria-hidden="true" className="mr-1 h-3.5 w-3.5" />
                 Medication Flag Detected
               </span>
             )}
             {isAmbiguous && (
               <span className="inline-flex items-center bg-[#fff1f1] px-2 py-0.5 text-xs font-medium text-[#da1e28]">
-                <WarningAltFilled className="mr-1 h-3.5 w-3.5" />
+                <WarningAltFilled aria-hidden="true" className="mr-1 h-3.5 w-3.5" />
                 Ambiguous Jurisdiction
               </span>
             )}
@@ -401,7 +401,9 @@ function ReviewCard({ item, onResolved }: ReviewCardProps) {
               )}
             </div>
             <button
-              className="text-xs font-medium text-[#0f62fe] hover:underline"
+              type="button"
+              aria-expanded={showEditor}
+              className="text-xs font-medium text-[#0f62fe] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f62fe]"
               onClick={() => setShowEditor((v) => !v)}
             >
               {showEditor ? "Collapse editor" : "Edit response"}
@@ -413,6 +415,7 @@ function ReviewCard({ item, onResolved }: ReviewCardProps) {
             </div>
           ) : showEditor && draftShowOriginal ? (
             <Textarea
+              aria-label="Draft response"
               value={editedResponse}
               onChange={(e) => {
                 setEditedResponse(e.target.value);
@@ -433,15 +436,16 @@ function ReviewCard({ item, onResolved }: ReviewCardProps) {
         {showEditor && (
           <div>
             <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-[#525252]">
-              Reviewer Note (optional, internal)
-            </p>
-            <Textarea
-              value={reviewerNote}
-              onChange={(e) => setReviewerNote(e.target.value)}
-              placeholder="Internal note for audit trail…"
-              rows={2}
-              className="rounded-none"
-            />
+                Reviewer Note (optional, internal)
+              </p>
+              <Textarea
+                aria-label="Reviewer note"
+                value={reviewerNote}
+                onChange={(e) => setReviewerNote(e.target.value)}
+                placeholder="Internal note for audit trail…"
+                rows={2}
+                className="rounded-none"
+              />
           </div>
         )}
 
@@ -467,6 +471,7 @@ function ReviewCard({ item, onResolved }: ReviewCardProps) {
               </div>
             ) : rejectionShowOriginal ? (
               <Textarea
+                aria-label="Rejection reason"
                 value={rejectionReason}
                 onChange={(e) => {
                   setRejectionReason(e.target.value);
@@ -511,7 +516,7 @@ function ReviewCard({ item, onResolved }: ReviewCardProps) {
                 : enterRejectMode
             }
           >
-            <CloseFilled className="mr-1.5 h-3.5 w-3.5" />
+            <CloseFilled aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" />
             {action === "rejecting" ? "Confirm Reject" : "Reject"}
           </Button>
           <Button
@@ -520,7 +525,7 @@ function ReviewCard({ item, onResolved }: ReviewCardProps) {
             disabled={action === "rejecting"}
             onClick={handleApprove}
           >
-            <CheckmarkFilled className="mr-1.5 h-3.5 w-3.5" />
+            <CheckmarkFilled aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" />
             Approve Guidance
           </Button>
         </div>
@@ -601,7 +606,7 @@ export default function HITLReviewPage() {
 
       {!loading && !error && items.length === 0 && (
         <div className="border border-[#e0e0e0] bg-white p-8 text-center text-sm text-[#525252]">
-          <CheckmarkFilled className="mx-auto mb-2 h-6 w-6 text-[#24a148]" />
+          <CheckmarkFilled aria-hidden="true" className="mx-auto mb-2 h-6 w-6 text-[#24a148]" />
           No pending reviews. All caught up!
         </div>
       )}

@@ -21,7 +21,7 @@ function StatusBadge({ status }: { status: RegistryRecord["status"] }) {
         variant="outline"
         className="h-auto rounded-none border-[#24a148] bg-[#defbe6] px-2 py-0.5 text-xs font-medium text-[#0e6027]"
       >
-        <CheckmarkFilled className="mr-1.5 h-3.5 w-3.5 text-[#24a148]" />
+        <CheckmarkFilled aria-hidden="true" className="mr-1.5 h-3.5 w-3.5 text-[#24a148]" />
         Approved
       </Badge>
     );
@@ -32,7 +32,7 @@ function StatusBadge({ status }: { status: RegistryRecord["status"] }) {
         variant="outline"
         className="h-auto rounded-none border-[#da1e28] bg-[#fff1f1] px-2 py-0.5 text-xs font-medium text-[#a2191f]"
       >
-        <CloseFilled className="mr-1.5 h-3.5 w-3.5 text-[#da1e28]" />
+        <CloseFilled aria-hidden="true" className="mr-1.5 h-3.5 w-3.5 text-[#da1e28]" />
         {status.charAt(0).toUpperCase() + status.slice(1)}
       </Badge>
     );
@@ -43,7 +43,7 @@ function StatusBadge({ status }: { status: RegistryRecord["status"] }) {
       variant="outline"
       className="h-auto rounded-none border-[#f1c21b] bg-[#fcf4d6] px-2 py-0.5 text-xs font-medium text-[#161616]"
     >
-      <WarningAltFilled className="mr-1.5 h-3.5 w-3.5 text-[#b28600]" />
+      <WarningAltFilled aria-hidden="true" className="mr-1.5 h-3.5 w-3.5 text-[#b28600]" />
       Restricted
     </Badge>
   );
@@ -69,7 +69,7 @@ export default function RegistryStatusCard({ record, jurisdiction, loading }: Pr
           variant="outline"
           className="h-auto rounded-none border-[#a6c8ff] bg-[#edf5ff] px-2 py-0.5 font-mono text-xs font-normal text-[#0043ce]"
         >
-          <Security className="mr-1 h-3.5 w-3.5" />
+          <Security aria-hidden="true" className="mr-1 h-3.5 w-3.5" />
           {jurisdiction}
         </Badge>
         {record && <StatusBadge status={record.status} />}
@@ -101,7 +101,7 @@ export default function RegistryStatusCard({ record, jurisdiction, loading }: Pr
                   Restriction Reason
                 </p>
                 <div className="inline-flex items-start bg-[#fff1f1] px-2 py-1 text-xs font-medium text-[#da1e28]">
-                  <WarningAltFilled className="mr-1 mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <WarningAltFilled aria-hidden="true" className="mr-1 mt-0.5 h-3.5 w-3.5 shrink-0" />
                   {record.restriction_reason}
                 </div>
               </div>

@@ -38,7 +38,7 @@ export default function PipelineTraceSheet({ trace }: Props) {
           size="sm"
           className="h-7 rounded-none px-2 text-xs text-[#0f62fe] hover:bg-[#edf5ff] hover:text-[#0043ce]"
         >
-          <DocumentView className="mr-1.5 h-3.5 w-3.5" />
+          <DocumentView aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" />
           View Pipeline Trace
         </Button>
       </SheetTrigger>

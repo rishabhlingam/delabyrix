@@ -210,9 +210,9 @@ function RejectedCard({ reason, reasonEnglish, sourceLang }: RejectedCardProps) 
                   type="button"
                   disabled={translating}
                   onClick={toggleLang}
-                  className="inline-flex items-center text-xs font-medium text-[#0f62fe] hover:underline disabled:opacity-50"
+                  className="inline-flex items-center text-xs font-medium text-[#0f62fe] hover:underline disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f62fe]"
                 >
-                  <Translate className="mr-1 h-3.5 w-3.5" />
+                  <Translate aria-hidden="true" className="mr-1 h-3.5 w-3.5" />
                   {showOriginal ? "Translate to English" : `Show Original (${lang.toUpperCase()})`}
                 </button>
               )}
@@ -221,9 +221,9 @@ function RejectedCard({ reason, reasonEnglish, sourceLang }: RejectedCardProps) 
                   type="button"
                   disabled={enTranslating}
                   onClick={toggleEnForPatient}
-                  className="inline-flex items-center text-xs font-medium text-[#0f62fe] hover:underline disabled:opacity-50"
+                  className="inline-flex items-center text-xs font-medium text-[#0f62fe] hover:underline disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f62fe]"
                 >
-                  <Translate className="mr-1 h-3.5 w-3.5" />
+                  <Translate aria-hidden="true" className="mr-1 h-3.5 w-3.5" />
                   {showEnForPatient
                     ? `Translate to ${langNames[lang] ?? lang.toUpperCase()}`
                     : "Show Original (EN)"}
@@ -437,10 +437,10 @@ export default function PatientAssistantPage() {
       <div className="flex flex-wrap items-center gap-3">
         {/* Language */}
         <div className="flex items-center gap-1.5">
-          <Translate className="h-3.5 w-3.5 text-[#525252]" />
+          <Translate aria-hidden="true" className="h-3.5 w-3.5 text-[#525252]" />
           <span className="text-xs text-[#525252]">Language</span>
           <Select value={language} onValueChange={setLanguage}>
-            <SelectTrigger className="h-8 w-24 rounded-none text-xs">
+            <SelectTrigger aria-label="Language" className="h-8 w-24 rounded-none text-xs">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -455,7 +455,7 @@ export default function PatientAssistantPage() {
         <div className="flex items-center gap-1.5">
           <span className="text-xs text-[#525252]">Country</span>
           <Select value={country} onValueChange={setCountry}>
-            <SelectTrigger className="h-8 w-28 rounded-none text-xs">
+            <SelectTrigger aria-label="Country" className="h-8 w-28 rounded-none text-xs">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -480,7 +480,7 @@ export default function PatientAssistantPage() {
         <Separator orientation="vertical" className="h-5" />
 
         {/* Mode switcher */}
-        <div className="flex gap-1">
+        <div className="flex gap-1" role="group" aria-label="Select mode">
           {(
             [
               { key: "question", label: "Clinical Question" },
@@ -491,7 +491,8 @@ export default function PatientAssistantPage() {
             <button
               key={key}
               onClick={() => switchMode(key)}
-              className={`rounded-none px-3 py-1.5 text-xs font-medium transition-colors ${
+              aria-pressed={mode === key}
+              className={`rounded-none px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f62fe] ${
                 mode === key
                   ? "bg-[#0f62fe] text-white"
                   : "border border-[#e0e0e0] bg-white text-[#525252] hover:bg-[#f4f4f4]"
@@ -519,7 +520,7 @@ export default function PatientAssistantPage() {
                   key={p.label}
                   type="button"
                   onClick={() => insertSamplePrompt(p)}
-                  className="rounded-none border border-[#e0e0e0] bg-white px-2.5 py-1 text-xs text-[#525252] hover:border-[#0f62fe] hover:text-[#0f62fe] transition-colors"
+                  className="rounded-none border border-[#e0e0e0] bg-white px-2.5 py-1 text-xs text-[#525252] hover:border-[#0f62fe] hover:text-[#0f62fe] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f62fe]"
                 >
                   {p.label}
                 </button>
@@ -529,6 +530,7 @@ export default function PatientAssistantPage() {
 
           <form onSubmit={handleQuerySubmit} className="flex flex-col gap-3">
             <Textarea
+              aria-label="Clinical question"
               placeholder="e.g. 'I take metamizole at home. Is this allowed in the US?' / 'Tomo metamizol en casa. ¿Está permitido en los Estados Unidos?'"
               value={queryText}
               onChange={(e) => setQueryText(e.target.value)}
@@ -664,7 +666,7 @@ export default function PatientAssistantPage() {
                 value={selectedDocType}
                 onValueChange={(v) => setSelectedDocType(v as DocType)}
               >
-                <SelectTrigger className="h-8 w-56 rounded-none text-xs">
+                <SelectTrigger aria-label="Document Type" className="h-8 w-56 rounded-none text-xs">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -682,7 +684,7 @@ export default function PatientAssistantPage() {
               onClick={handleFetchSampleDoc}
               disabled={sampleDocState.phase === "loading"}
             >
-              <DocumentView className="mr-1.5 h-3.5 w-3.5" />
+              <DocumentView aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" />
               {sampleDocState.phase === "loading" ? "Loading…" : "Fetch Document"}
             </Button>
           </div>
@@ -720,7 +722,7 @@ export default function PatientAssistantPage() {
           <form onSubmit={handleUploadSubmit} className="flex flex-col gap-3">
             <div className="border border-dashed border-[#e0e0e0] bg-white p-6">
               <div className="flex flex-col items-center gap-2">
-                <DocumentView className="h-8 w-8 text-[#525252]" />
+                <DocumentView aria-hidden="true" className="h-8 w-8 text-[#525252]" />
                 <p className="text-sm text-[#525252]">
                   Upload a consent form or hospital bill (.txt or .pdf)
                 </p>
