@@ -3,7 +3,7 @@
  * Uses IBM Carbon design tokens throughout per ui-design-system.md.
  */
 import React, { useEffect, useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { Separator } from "@/components/ui/separator";
 import LocaleSwitcher from "@/components/layout/LocaleSwitcher";
 import { getHITLQueue } from "@/api/client";
@@ -19,9 +19,31 @@ function PendingBadge({ count }: { count: number }) {
   );
 }
 
+// Maps each route path to its page title i18n key (English fallback used for document.title)
+const ROUTE_TITLE_KEYS: Record<string, string> = {
+  "/": "nav.home",
+  "/patient": "page.patient_title",
+  "/hitl": "page.hitl_title",
+  "/registry": "page.registry_title",
+  "/provider": "page.provider_title",
+  "/analytics": "page.analytics_title",
+};
+
+const SITE_NAME = "Delabyrix";
+
 export default function AppShell() {
   const [pendingCount, setPendingCount] = useState(0);
   const { t } = useLocale();
+  const location = useLocation();
+
+  // Update browser tab title on every navigation
+  useEffect(() => {
+    const key = ROUTE_TITLE_KEYS[location.pathname];
+    const pageLabel = key ? t(key) : null;
+    document.title = pageLabel
+      ? `${pageLabel} · ${SITE_NAME}`
+      : SITE_NAME;
+  }, [location.pathname, t]);
 
   const NAV_ITEMS = [
     { to: "/", labelKey: "nav.home" },
