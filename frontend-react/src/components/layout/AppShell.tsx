@@ -75,7 +75,7 @@ export default function AppShell() {
   }, []);
 
   return (
-    <div className="min-h-svh bg-background text-foreground">
+    <div className="flex min-h-svh flex-col bg-background text-foreground">
       {/* Top Carbon Header */}
       <header className="border-b border-[#e0e0e0] bg-white">
         <div className="mx-auto max-w-6xl px-4">
@@ -115,9 +115,19 @@ export default function AppShell() {
       </header>
 
       {/* Page Content */}
-      <main className="mx-auto max-w-6xl px-4">
+      <main className="mx-auto w-full max-w-6xl flex-1 px-4">
         <Outlet />
       </main>
+
+      {/* Persistent clinical safety footer */}
+      <footer className="mt-auto border-t border-[#e0e0e0] bg-white">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3">
+          <p className="text-xs text-[#525252]">{t("footer.disclaimer")}</p>
+          <span className="font-mono text-xs text-[#525252]">
+            Delabyrix v0.2.0 · IBM Granite-4 · Zero-PII Mode
+          </span>
+        </div>
+      </footer>
     </div>
   );
 }

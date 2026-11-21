@@ -166,8 +166,8 @@ describe("AnalyticsDashboardPage", () => {
     });
     // Must NOT contain the old literal "$FDA+EMA+others$" string
     expect(screen.queryByText(/\$FDA\+EMA\+others\$/i)).not.toBeInTheDocument();
-    // Should contain the clean "·" separated label
-    expect(screen.getByText(/US_FDA/)).toBeInTheDocument();
+    // Should show the clean static label
+    expect(screen.getByText(/FDA · EMA · National/)).toBeInTheDocument();
   });
 
   it("renders jurisdiction breakdown chart section", async () => {
@@ -181,8 +181,8 @@ describe("AnalyticsDashboardPage", () => {
     });
     // The mocked Recharts ResponsiveContainer renders with data-testid
     expect(screen.getAllByTestId("recharts-responsive").length).toBeGreaterThan(0);
-    // The KPI and jurisdiction sub-label should show US_FDA text
-    expect(screen.getByText(/US_FDA/)).toBeInTheDocument();
+    // The KPI jurisdiction sub-label shows the clean static text
+    expect(screen.getByText(/FDA · EMA · National/)).toBeInTheDocument();
   });
 
   it("renders language breakdown chart section with Top 8 + Other label", async () => {

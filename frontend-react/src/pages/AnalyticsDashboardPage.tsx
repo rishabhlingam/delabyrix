@@ -311,9 +311,7 @@ export default function AnalyticsDashboardPage() {
         const totalMedFlags = d.top_medication_flags.reduce((s, m) => s + m.count, 0);
         const activeJurisdictions = Object.keys(d.jurisdiction_breakdown);
         const activeJurCount = activeJurisdictions.length;
-        const jurisdictionLabel = activeJurCount > 0
-          ? activeJurisdictions.slice(0, 3).join(" · ") + (activeJurCount > 3 ? ` +${activeJurCount - 3}` : "")
-          : "FDA · EMA · National";
+        const jurisdictionLabel = "FDA · EMA · National";
 
         // ── Jurisdiction bar chart data ───────────────────────────────────────
         const jurisdictionChartData = Object.entries(d.jurisdiction_breakdown)

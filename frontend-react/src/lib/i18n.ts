@@ -35,6 +35,7 @@ export const TRANSLATIONS: Record<Locale, Record<string, string>> = {
     "page.registry_desc": "Check medication regulatory status across US FDA and EU EMA.",
     "page.analytics_title": "Analytics Dashboard",
     "page.analytics_desc": "Zero-PII aggregated metrics for care coordination teams.",
+    "footer.disclaimer": "Clinical decision-support & navigation aid only — always verify with a licensed healthcare provider.",
   },
   es: {
     "nav.home": "Inicio",
@@ -64,6 +65,7 @@ export const TRANSLATIONS: Record<Locale, Record<string, string>> = {
     "page.registry_desc": "Verifique el estado regulatorio de medicamentos en FDA y EMA.",
     "page.analytics_title": "Panel de Análisis",
     "page.analytics_desc": "Métricas agregadas sin PII para equipos de coordinación de atención.",
+    "footer.disclaimer": "Solo ayuda de apoyo clínico y navegación — verifique siempre con un proveedor de salud autorizado.",
   },
   hi: {
     "nav.home": "होम",
@@ -93,6 +95,7 @@ export const TRANSLATIONS: Record<Locale, Record<string, string>> = {
     "page.registry_desc": "US FDA और EU EMA में दवाओं की नियामक स्थिति जांचें।",
     "page.analytics_title": "विश्लेषण डैशबोर्ड",
     "page.analytics_desc": "देखभाल समन्वय टीमों के लिए शून्य-PII समग्र मेट्रिक्स।",
+    "footer.disclaimer": "केवल नैदानिक सहायता और नेविगेशन — हमेशा किसी लाइसेंस प्राप्त स्वास्थ्य सेवा प्रदाता से सत्यापित करें।",
   },
 };
 
