@@ -95,7 +95,7 @@ interface LaunchCard {
 
 const LAUNCH_CARDS: LaunchCard[] = [
   {
-    to: "/",
+    to: "/patient",
     title: "Patient & Document Assistant",
     role: "Foreign Patient / International Traveler",
     description:
