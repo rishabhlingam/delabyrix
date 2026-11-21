@@ -2,7 +2,7 @@
  * AppShell — Carbon-compliant top-nav layout with live HITL pending badge and locale switcher.
  * Uses IBM Carbon design tokens throughout per ui-design-system.md.
  */
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { Separator } from "@/components/ui/separator";
 import LocaleSwitcher from "@/components/layout/LocaleSwitcher";
@@ -19,9 +19,8 @@ function PendingBadge({ count }: { count: number }) {
   );
 }
 
-// Maps each route path to its page title i18n key (English fallback used for document.title)
+// Maps sub-route paths to their page title i18n keys
 const ROUTE_TITLE_KEYS: Record<string, string> = {
-  "/": "nav.home",
   "/patient": "page.patient_title",
   "/hitl": "page.hitl_title",
   "/registry": "page.registry_title",
@@ -29,48 +28,31 @@ const ROUTE_TITLE_KEYS: Record<string, string> = {
   "/analytics": "page.analytics_title",
 };
 
+const NAV_ITEMS = [
+  { to: "/", labelKey: "nav.home" },
+  { to: "/patient", labelKey: "nav.patient_assistant" },
+  { to: "/hitl", labelKey: "nav.hitl_review", showBadge: true },
+  { to: "/registry", labelKey: "nav.registry" },
+  { to: "/provider", labelKey: "nav.provider_support" },
+  { to: "/analytics", labelKey: "nav.analytics" },
+] as const;
+
 const SITE_NAME = "Delabyrix";
+const DEFAULT_HOME_TITLE = "Delabyrix — Cross-Border Clinical AI Navigation";
 
 export default function AppShell() {
   const [pendingCount, setPendingCount] = useState(0);
   const { t } = useLocale();
   const location = useLocation();
 
-  // Update browser tab title on every navigation
+  // Update browser tab title on every navigation using active locale
   useEffect(() => {
     const key = ROUTE_TITLE_KEYS[location.pathname];
     const pageLabel = key ? t(key) : null;
     document.title = pageLabel
       ? `${pageLabel} · ${SITE_NAME}`
-      : SITE_NAME;
+      : DEFAULT_HOME_TITLE;
   }, [location.pathname, t]);
-
-  const location = useLocation();
-
-  const NAV_ITEMS = [
-    { to: "/", labelKey: "nav.home" },
-    { to: "/patient", labelKey: "nav.patient_assistant" },
-    { to: "/hitl", labelKey: "nav.hitl_review", showBadge: true },
-    { to: "/registry", labelKey: "nav.registry" },
-    { to: "/provider", labelKey: "nav.provider_support" },
-    { to: "/analytics", labelKey: "nav.analytics" },
-  ] as const;
-
-  // Map route paths to English page names for the browser tab title.
-  const PAGE_TITLES: Record<string, string> = {
-    "/patient": "Patient Assistant",
-    "/hitl": "HITL Review",
-    "/registry": "Registry Explorer",
-    "/provider": "Provider Support",
-    "/analytics": "Analytics",
-  };
-
-  useEffect(() => {
-    const pageName = PAGE_TITLES[location.pathname];
-    document.title = pageName
-      ? `${pageName} · Delabyrix`
-      : "Delabyrix — Cross-Border Clinical AI Navigation";
-  }, [location.pathname]);
 
   useEffect(() => {
     let cancelled = false;
