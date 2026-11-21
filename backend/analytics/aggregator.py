@@ -14,6 +14,11 @@ Privacy rules (architecture.md §10):
 The in-memory telemetry store is a lightweight append-only list protected
 by a threading.Lock — same pattern as HITLQueue.
 
+Telemetry is also persisted to a ``telemetry_events`` table in the same
+SQLite database as the HITL queue (``data/hitl_queue.db`` by default).
+This allows the demo seeder — which runs as a separate process — to write
+events that the FastAPI server process will see on its next snapshot.
+
 Matches GET /analytics/dashboard contract (architecture.md §6.5).
 Proactive care pattern analytics added per idea.txt requirement.
 """
@@ -21,6 +26,7 @@ Proactive care pattern analytics added per idea.txt requirement.
 from __future__ import annotations
 
 import json
+import sqlite3
 import threading
 from collections import Counter
 from dataclasses import dataclass, field
@@ -81,6 +87,169 @@ class TelemetryEvent:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# SQLite persistence helpers for telemetry
+# ──────────────────────────────────────────────────────────────────────────────
+
+_CREATE_TELEMETRY_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS telemetry_events (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    language                TEXT NOT NULL DEFAULT 'en',
+    user_type               TEXT NOT NULL DEFAULT 'patient',
+    jurisdiction            TEXT NOT NULL DEFAULT 'OTHER',
+    escalated               INTEGER NOT NULL DEFAULT 0,
+    medication_flags        TEXT NOT NULL DEFAULT '[]',
+    pipeline_stages_completed INTEGER NOT NULL DEFAULT 4,
+    timestamp               TEXT NOT NULL
+);
+"""
+
+_INSERT_TELEMETRY_SQL = """
+INSERT INTO telemetry_events
+    (language, user_type, jurisdiction, escalated,
+     medication_flags, pipeline_stages_completed, timestamp)
+VALUES (?, ?, ?, ?, ?, ?, ?);
+"""
+
+_SELECT_TELEMETRY_SQL = """
+SELECT language, user_type, jurisdiction, escalated,
+       medication_flags, pipeline_stages_completed, timestamp
+FROM telemetry_events;
+"""
+
+_DELETE_DEMO_TELEMETRY_SQL = """
+DELETE FROM telemetry_events WHERE json_extract(medication_flags, '$') IS NOT NULL
+    AND id IN (
+        SELECT id FROM telemetry_events ORDER BY id DESC LIMIT 999999
+    )
+    AND timestamp >= datetime('now', '-61 days');
+"""
+
+
+def _get_db_path() -> str:
+    """Return the configured HITL DB path (same DB for telemetry)."""
+    from backend.config import get_settings
+    return get_settings().hitl_db_path
+
+
+def _ensure_telemetry_table(db_path: str) -> None:
+    """Create the telemetry_events table if it does not already exist."""
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(_CREATE_TELEMETRY_TABLE_SQL)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _persist_event(db_path: str, event: "TelemetryEvent") -> None:
+    """Append a single TelemetryEvent row to the SQLite table."""
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(_CREATE_TELEMETRY_TABLE_SQL)
+        conn.execute(
+            _INSERT_TELEMETRY_SQL,
+            (
+                event.language,
+                event.user_type,
+                event.jurisdiction,
+                1 if event.escalated else 0,
+                json.dumps(event.medication_flags),
+                event.pipeline_stages_completed,
+                event.timestamp.isoformat(),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _load_events_from_db(db_path: str) -> List["TelemetryEvent"]:
+    """Read all rows from telemetry_events and return as TelemetryEvent objects."""
+    if not Path(db_path).exists():
+        return []
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute(_CREATE_TELEMETRY_TABLE_SQL)
+        conn.commit()
+        rows = conn.execute(_SELECT_TELEMETRY_SQL).fetchall()
+    finally:
+        conn.close()
+
+    events: List[TelemetryEvent] = []
+    for row in rows:
+        try:
+            ts = datetime.fromisoformat(row["timestamp"])
+        except ValueError:
+            ts = datetime.now(tz=timezone.utc)
+        events.append(
+            TelemetryEvent(
+                language=row["language"],
+                user_type=row["user_type"],
+                jurisdiction=row["jurisdiction"],
+                escalated=bool(row["escalated"]),
+                medication_flags=json.loads(row["medication_flags"] or "[]"),
+                pipeline_stages_completed=row["pipeline_stages_completed"],
+                timestamp=ts,
+            )
+        )
+    return events
+
+
+def bulk_insert_telemetry_events(db_path: str, events: List["TelemetryEvent"]) -> int:
+    """
+    Insert a batch of TelemetryEvent rows directly into the SQLite table.
+
+    Used by the demo seeder so that events written in one process are visible
+    to the FastAPI server process on its next snapshot() call.
+    Returns the number of rows inserted.
+    """
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(_CREATE_TELEMETRY_TABLE_SQL)
+        rows = [
+            (
+                e.language,
+                e.user_type,
+                e.jurisdiction,
+                1 if e.escalated else 0,
+                json.dumps(e.medication_flags),
+                e.pipeline_stages_completed,
+                e.timestamp.isoformat(),
+            )
+            for e in events
+        ]
+        with conn:
+            conn.executemany(_INSERT_TELEMETRY_SQL, rows)
+        return len(rows)
+    finally:
+        conn.close()
+
+
+def delete_demo_telemetry_events(db_path: str, demo_prefix_timestamps: List[str]) -> int:
+    """
+    Delete telemetry rows whose timestamp matches the demo-seeded set.
+
+    Because telemetry rows carry no session_id tag, idempotency is achieved
+    by truncating ALL rows and re-inserting — same approach as the HITL seeder.
+    Returns the number of rows deleted.
+    """
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(_CREATE_TELEMETRY_TABLE_SQL)
+        conn.commit()
+        with conn:
+            cur = conn.execute("DELETE FROM telemetry_events;")
+            return cur.rowcount
+    finally:
+        conn.close()
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # In-memory telemetry store (singleton)
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -88,19 +257,39 @@ class _TelemetryStore:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._events: List[TelemetryEvent] = []
+        self._hydrated = False   # True once we've loaded from the DB once
+
+    def _hydrate(self) -> None:
+        """Load all persisted events from the DB into memory (called once)."""
+        try:
+            db_path = _get_db_path()
+            db_events = _load_events_from_db(db_path)
+            self._events = db_events
+        except Exception:
+            pass  # If DB is unavailable, fall back to empty in-memory state
+        self._hydrated = True
 
     def record(self, event: TelemetryEvent) -> None:
         with self._lock:
             self._events.append(event)
+        # Persist to DB so other processes (e.g. the seeder) and server restarts
+        # see the same events.
+        try:
+            _persist_event(_get_db_path(), event)
+        except Exception:
+            pass  # Non-fatal: in-memory event is still counted for this process
 
     def snapshot(self) -> List[TelemetryEvent]:
         with self._lock:
+            if not self._hydrated:
+                self._hydrate()
             return list(self._events)
 
     def clear(self) -> None:
-        """Test helper — clears all telemetry."""
+        """Test helper — clears in-memory events only (does not touch the DB)."""
         with self._lock:
             self._events.clear()
+            self._hydrated = True  # prevent re-hydration from DB during tests
 
 
 _store_instance: Optional[_TelemetryStore] = None
