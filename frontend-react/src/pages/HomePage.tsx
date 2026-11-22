@@ -2,85 +2,23 @@
  * HomePage — Landing page at /home (or the splash shown before navigating).
  *
  * Surfaces:
- * - Backend health status (GET /health)
- * - Active foundation model indicator (ibm/granite-4-h-small)
- * - Mock vs live watsonx status
+ * - App description and hero header
  * - Quick-launch cards for every module
+ * - Agentic pipeline overview and language/jurisdiction list
  *
  * Full IBM Carbon design system compliance per ui-design-system.md.
  */
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { Link } from "react-router-dom";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { getHealth, ApiError, type HealthResponse } from "@/api/client";
 import {
   CheckmarkFilled,
-  CloseFilled,
   WarningAltFilled,
   Security,
   Time,
 } from "@carbon/icons-react";
-
-// ─── Backend health banner ─────────────────────────────────────────────────────
-
-type HealthState =
-  | { phase: "loading" }
-  | { phase: "ok"; data: HealthResponse }
-  | { phase: "error" };
-
-function HealthBanner() {
-  const [state, setState] = useState<HealthState>({ phase: "loading" });
-
-  useEffect(() => {
-    getHealth()
-      .then((data) => setState({ phase: "ok", data }))
-      .catch(() => setState({ phase: "error" }));
-  }, []);
-
-  if (state.phase === "loading") {
-    return (
-      <div className="flex items-center gap-2 border border-[#e0e0e0] bg-white px-4 py-2.5 text-xs text-[#525252]">
-        <Time aria-hidden="true" className="h-3.5 w-3.5 text-[#b28600]" />
-        Checking backend health…
-      </div>
-    );
-  }
-
-  if (state.phase === "error") {
-    return (
-      <div className="flex items-center gap-2 border border-[#da1e28] bg-[#fff1f1] px-4 py-2.5 text-xs text-[#a2191f]">
-        <CloseFilled aria-hidden="true" className="h-3.5 w-3.5 text-[#da1e28]" />
-        Backend offline — start{" "}
-        <code className="font-mono">uvicorn backend.main:app --reload</code> to
-        enable live mode.
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-wrap items-center gap-3 border border-[#e0e0e0] bg-white px-4 py-2.5 text-xs">
-      <span className="flex items-center gap-1.5 text-[#24a148]">
-        <CheckmarkFilled aria-hidden="true" className="h-3.5 w-3.5" />
-        Backend v{state.data.version} — {state.data.status}
-      </span>
-      <Separator orientation="vertical" className="h-4" />
-      <span className="flex items-center gap-1.5 text-[#525252]">
-        <Security aria-hidden="true" className="h-3.5 w-3.5 text-[#0f62fe]" />
-        Model: ibm/granite-4-h-small
-      </span>
-      <Separator orientation="vertical" className="h-4" />
-      <Badge
-        variant="outline"
-        className="h-auto rounded-none border-[#f1c21b] bg-[#fcf4d6] px-2 py-0.5 font-mono text-[10px] font-normal text-[#161616]"
-      >
-        <WarningAltFilled aria-hidden="true" className="mr-1 h-3 w-3 text-[#b28600]" />
-        watsonx mock mode
-      </Badge>
-    </div>
-  );
-}
 
 // ─── Quick-launch cards ────────────────────────────────────────────────────────
 
@@ -148,21 +86,27 @@ export default function HomePage() {
     <div className="flex flex-col gap-6 py-6">
       {/* Hero header */}
       <div>
-        <p className="text-xs font-semibold tracking-wide text-[#0f62fe]">
-          Multilingual Clinical AI Agent &amp; BI Platform
-        </p>
-        <h1 className="mt-1 text-base font-medium text-[#161616]">
+        <h1 className="text-2xl font-semibold tracking-tight text-[#161616]">
           Welcome to Delabyrix
         </h1>
-        <p className="mt-1 text-sm text-[#525252]">
+        <p className="mt-1 text-sm font-medium text-[#0f62fe]">
+          Multilingual Clinical AI Agent &amp; BI Platform
+        </p>
+        <p className="mt-3 text-sm leading-relaxed text-[#161616]">
+          Delabyrix is a multilingual clinical AI platform that helps foreign
+          patients, healthcare providers, and care coordinators navigate
+          cross-border medical care. It goes beyond word-for-word translation —
+          interpreting medical meaning, applying cultural context, checking
+          jurisdiction-specific medication registries (US FDA &amp; EU EMA), and
+          routing high-stakes outputs through mandatory human review before
+          returning guidance.
+        </p>
+        <div className="mt-4 rounded-none border border-[#a6c8ff] border-l-4 border-l-[#0f62fe] bg-[#edf5ff] px-3.5 py-2.5 text-xs font-medium text-[#0043ce]">
           Powered by IBM watsonx.ai · Granite 4 · Cross-Border Medication
           Registry. Use the navigation above or the quick-launch cards below to
           get started.
-        </p>
+        </div>
       </div>
-
-      {/* Backend health + model status */}
-      <HealthBanner />
 
       <Separator className="bg-[#e0e0e0]" />
 

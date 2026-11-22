@@ -92,7 +92,7 @@ export default function AppShell() {
         <div className="mx-auto max-w-6xl px-4">
           <div className="flex items-center gap-6 py-3">
             {/* Brand */}
-            <span className="text-xs font-semibold tracking-wide text-[#0f62fe]">
+            <span className="text-lg font-semibold tracking-tight text-[#0f62fe]">
               Delabyrix
             </span>
             <Separator orientation="vertical" className="h-4" />
