@@ -182,7 +182,24 @@ def agent_query(body: AgentQueryRequest, response: Response):
         target_language="en",
         client=client,
     )
-    english_text = translation_result.translated_text
+    # Second-pass PII redaction on the translated English text: translation may
+    # expand abbreviations or romanise names, surfacing PII missed in Stage 0.
+    if body.source_language.lower() != "en":
+        english_redaction = redact(translation_result.translated_text)
+        english_text = english_redaction.redacted_text
+        # Merge any newly discovered PII types into the primary redaction result
+        if english_redaction.redaction_count:
+            redaction = type(redaction)(
+                redacted_text=redaction.redacted_text,
+                redaction_count=redaction.redaction_count + english_redaction.redaction_count,
+                types_found=redaction.types_found + [
+                    t for t in english_redaction.types_found
+                    if t not in redaction.types_found
+                ],
+                has_residual_pii=redaction.has_residual_pii or english_redaction.has_residual_pii,
+            )
+    else:
+        english_text = translation_result.translated_text
 
     # ── Stage 2: Medical Interpretation ──────────────────────────────────────
     interpretation = interpret(

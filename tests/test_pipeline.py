@@ -239,7 +239,7 @@ class TestPIIRedactor:
 
     def test_passport_id_redacted(self):
         result = redact("My passport number is A12345678.")
-        assert "[ID]" in result.redacted_text
+        assert "[REDACTED_ID]" in result.redacted_text
         assert "A12345678" not in result.redacted_text
         assert "passport_id" in result.types_found
 
@@ -277,8 +277,44 @@ class TestPIIRedactor:
 
     def test_name_redacted_heuristic(self):
         result = redact("My name is Robert Johnson and I need help.")
-        # Name heuristic should fire for "Robert Johnson"
+        # Contextual phrase "My name is" should catch Robert Johnson
         assert result.redaction_count >= 1
+        assert "Robert Johnson" not in result.redacted_text
+        assert "[REDACTED_NAME]" in result.redacted_text
+
+    def test_name_accented_contextual(self):
+        """Accented name after 'I am' must be redacted (the PII leak from the bug report)."""
+        result = redact("I am María García, ID number 12345678A. I take metamizole.")
+        assert "María" not in result.redacted_text
+        assert "García" not in result.redacted_text
+        assert "12345678A" not in result.redacted_text
+        assert "[REDACTED_NAME]" in result.redacted_text
+        assert "[REDACTED_ID]" in result.redacted_text
+
+    def test_alphanumeric_id_trailing_letter(self):
+        """Standalone 8-digit + letter ID token (e.g. DNI) must be caught."""
+        result = redact("My DNI is 12345678A.")
+        assert "12345678A" not in result.redacted_text
+        assert "[REDACTED_ID]" in result.redacted_text
+
+    def test_id_keyword_prefix(self):
+        """'ID number <token>' must be redacted regardless of token format."""
+        result = redact("ID number 12345678A.")
+        assert "12345678A" not in result.redacted_text
+        assert "[REDACTED_ID]" in result.redacted_text
+
+    def test_me_llamo_redacted(self):
+        """Spanish 'Me llamo' phrase must redact the following name."""
+        result = redact("Me llamo María García, necesito ayuda.")
+        assert "María" not in result.redacted_text
+        assert "García" not in result.redacted_text
+        assert "[REDACTED_NAME]" in result.redacted_text
+
+    def test_soy_redacted(self):
+        """Spanish 'Soy <Name>' must redact the name."""
+        result = redact("Soy Juan Pérez y tengo una pregunta.")
+        assert "Juan" not in result.redacted_text
+        assert "[REDACTED_NAME]" in result.redacted_text
 
     def test_residual_pii_flag_standalone_date(self):
         # A standalone date in context not preceded by DOB keyword
@@ -685,3 +721,80 @@ class TestCrossBorderBannedDrugEscalation:
         result = evaluate_escalation(inp)
         # No rule 2 — metamizole is approved in EU_EMA
         assert not any("rule_2" in r for r in result.rules_triggered)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PII Leak Regression: accented names + alphanumeric IDs in HITL queue
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestPIILeakRegressionHITL:
+    """
+    Regression test for the bug where "I am María García, ID number 12345678A."
+    appeared unredacted in GET /hitl/queue under `patient_inquiry` /
+    `redacted_original_text`.
+
+    The test covers:
+      1. Stage 0 redaction alone catches both the name and the ID.
+      2. When the pipeline escalates, the HITL queue stores only the
+         redacted form (no raw PII in redacted_original_text).
+    """
+
+    _INQUIRY = (
+        "I am María García, ID number 12345678A. "
+        "I take metamizole at home for pain. "
+        "Is it permitted in the United States? My doctor in Spain prescribed it for me."
+    )
+
+    def test_stage0_redacts_accented_name_and_alphanumeric_id(self):
+        """Stage 0 must remove 'María García' and '12345678A' from text."""
+        result = redact(self._INQUIRY)
+        assert "María" not in result.redacted_text, "Accented first name leaked"
+        assert "García" not in result.redacted_text, "Accented last name leaked"
+        assert "12345678A" not in result.redacted_text, "Alphanumeric ID leaked"
+        assert "[REDACTED_NAME]" in result.redacted_text
+        assert "[REDACTED_ID]" in result.redacted_text
+
+    def test_hitl_queue_stores_only_redacted_text(self, mock_client):
+        """
+        When the pipeline escalates (metamizole is banned in US_FDA),
+        the HITL queue item must NOT contain 'María', 'García', or '12345678A'
+        in redacted_original_text or the pipeline_trace.
+        """
+        from backend.hitl.queue import get_queue
+
+        redaction = redact(self._INQUIRY)
+        jctx = resolve("US")
+        interpretation = interpret(redaction.redacted_text, jctx, mock_client)
+
+        # Build escalation input using only the already-redacted text
+        inp = EscalationInput(
+            session_id="pii-leak-regression",
+            original_text=redaction.redacted_text,
+            user_type="patient",
+            country="US",
+            is_ambiguous_jurisdiction=False,
+            redaction_result=redaction,
+            min_confidence=0.95,
+            medication_flags=interpretation.medication_flags,
+            pipeline_trace={"inquiry": redaction.redacted_text},
+            draft_response="Please consult a doctor.",
+            redacted_original_text=redaction.redacted_text,
+            english_inquiry=redaction.redacted_text,
+        )
+        esc_result = evaluate_escalation(inp)
+        # metamizole banned in US → rule 2 fires → escalation happens
+        assert esc_result.should_escalate is True
+        review_id = enqueue_if_escalated(esc_result)
+        assert review_id is not None
+
+        item = get_queue().get_item(review_id)
+        assert item is not None
+
+        rot = item.redacted_original_text or ""
+        assert "María" not in rot, f"Name leaked in redacted_original_text: {rot!r}"
+        assert "García" not in rot, f"Name leaked in redacted_original_text: {rot!r}"
+        assert "12345678A" not in rot, f"ID leaked in redacted_original_text: {rot!r}"
+
+        trace_str = str(item.pipeline_trace)
+        assert "María" not in trace_str, f"Name leaked in pipeline_trace: {trace_str!r}"
+        assert "12345678A" not in trace_str, f"ID leaked in pipeline_trace: {trace_str!r}"
